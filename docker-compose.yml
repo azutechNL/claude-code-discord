@@ -29,9 +29,16 @@ services:
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - APPLICATION_ID=${APPLICATION_ID}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # ANTHROPIC_API_KEY intentionally omitted — using OAuth (Claude Pro/Max).
+      # After `docker compose up -d`, run:
+      #   docker exec -it claude-code-discord claude /login
+      # OAuth tokens persist in the claude-config volume. To use API key
+      # instead, uncomment the line below and set ANTHROPIC_API_KEY in .env.
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - WORK_DIR=${WORK_DIR:-/app/workspace}
       - USER_ID=${USER_ID:-}
+      - ADMIN_USER_IDS=${ADMIN_USER_IDS:-}
+      - ADMIN_ROLE_IDS=${ADMIN_ROLE_IDS:-}
       - CATEGORY_NAME=${CATEGORY_NAME:-claude-code}
       - MONITOR_CHANNEL_ID=${MONITOR_CHANNEL_ID:-}
       - MONITOR_BOT_IDS=${MONITOR_BOT_IDS:-}
