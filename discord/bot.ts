@@ -250,14 +250,27 @@ export async function createDiscordBot(
     };
   }
 
-  // Helper: check if an interaction belongs to our bot channel or a thread inside it
+  // Helper: check if an interaction belongs to our bot channel, an allowed
+  // channel (via ALLOWED_CHANNEL_IDS), a /bind'd channel, or a thread whose
+  // parent is any of the above.
   function isOurChannel(channelId: string): boolean {
-    if (!myChannel) return false;
-    if (channelId === myChannel.id) return true;
-    // Check if the interaction is inside a thread whose parent is our channel
+    // Auto-created main channel for this branch
+    if (myChannel && channelId === myChannel.id) return true;
+    // Static allowlist from env
+    if (dependencies.allowedChannelIds?.has(channelId)) return true;
+    // Dynamic /bind allowlist
+    if (dependencies.isChannelBound?.(channelId)) return true;
+
+    // Fall through to parent-channel check for threads
     const channel = client.channels.cache.get(channelId);
     // deno-lint-ignore no-explicit-any
-    return !!(channel && (channel as any).parentId === myChannel.id);
+    const parentId: string | undefined = (channel as any)?.parentId;
+    if (!parentId) return false;
+
+    if (myChannel && parentId === myChannel.id) return true;
+    if (dependencies.allowedChannelIds?.has(parentId)) return true;
+    if (dependencies.isChannelBound?.(parentId)) return true;
+    return false;
   }
 
   // Command handler - completely generic

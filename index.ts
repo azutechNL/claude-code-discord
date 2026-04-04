@@ -317,11 +317,26 @@ export async function createClaudeCodeBot(config: BotConfig) {
   const monitorChannelId = Deno.env.get("MONITOR_CHANNEL_ID");
   const monitorBotIds = Deno.env.get("MONITOR_BOT_IDS")?.split(",").map(s => s.trim()).filter(Boolean);
 
+  // Parse ALLOWED_CHANNEL_IDS env var — comma-separated Discord channel/forum IDs
+  // in which the bot accepts commands beyond its auto-created main channel.
+  const allowedChannelIdsRaw = Deno.env.get("ALLOWED_CHANNEL_IDS") ?? "";
+  const allowedChannelIds = new Set(
+    allowedChannelIdsRaw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  if (allowedChannelIds.size > 0) {
+    console.log(`[index] ALLOWED_CHANNEL_IDS: ${allowedChannelIds.size} channel(s) allowed`);
+  }
+
   // Create dependencies object for Discord bot
   const dependencies: BotDependencies = {
     commands: getAllCommands(),
     cleanSessionId,
     botSettings,
+    allowedChannelIds,
+    isChannelBound: (channelId) => channelBindings.has(channelId),
     onContinueSession: async (ctx) => {
       await allHandlers.claude.onContinue(ctx);
     },

@@ -127,4 +127,12 @@ export interface BotDependencies {
   onContinueSession?: (ctx: InteractionContext) => Promise<void>;
   /** Optional channel monitoring config for auto-responding to messages */
   monitorConfig?: MonitorConfig;
+  /** Static list of Discord channel IDs (including forum channels) in which
+   *  the bot accepts slash commands and button interactions. Loaded from
+   *  the ALLOWED_CHANNEL_IDS env var. Threads whose parent is in this list
+   *  are also accepted. */
+  allowedChannelIds?: Set<string>;
+  /** Dynamic callback: true if the channel ID has a /bind project binding.
+   *  Bound channels are auto-allowed in addition to allowedChannelIds. */
+  isChannelBound?: (channelId: string) => boolean;
 }
