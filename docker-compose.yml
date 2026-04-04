@@ -49,9 +49,9 @@ services:
       # Persist bot data (todos, sessions, etc.)
       - bot-data:/app/.bot-data
       - claude-config:/home/claude/.claude
-      # Optional: Mount your local workspace for Claude to work on
-      # Uncomment and modify path as needed:
-      # - /path/to/your/project:/app/workspace
+      # Host projects workspace — unbound channels see all projects here.
+      # Channels can /bind <folder> to narrow scope to one project subdir.
+      - /home/karim/projects:/workspaces/projects:rw
 
     # Resource limits (adjust based on your needs)
     deploy:
