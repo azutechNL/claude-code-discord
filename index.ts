@@ -24,7 +24,9 @@ import {
   initAllPersistence,
   getChannelSessionsManager,
   getThreadSessionsManager,
+  getChannelBindingsManager,
 } from "./util/persistence.ts";
+import { ChannelBindingManager, createBindCommandHandlers } from "./core/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
 import { createClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks } from "./claude/index.ts";
@@ -112,9 +114,14 @@ export async function createClaudeCodeBot(config: BotConfig) {
   await initAllPersistence();
   const channelSessionsPersister = getChannelSessionsManager();
   const threadSessionsPersister = getThreadSessionsManager();
+  const channelBindingsPersister = getChannelBindingsManager();
 
   // Load previously-persisted channel→session mappings so /claude resumes after restart
   const initialChannelSessions = await channelSessionsPersister.load({});
+
+  // Per-channel project binding manager (hydrated from .bot-data/channel-bindings.json)
+  const channelBindings = new ChannelBindingManager(channelBindingsPersister);
+  await channelBindings.load();
 
   // Initialize dynamic model fetching (uses ANTHROPIC_API_KEY if available)
   initModels();
@@ -267,6 +274,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
           .save(snapshot)
           .catch((err) => console.error('[index] persistChannelSessions failed:', err));
       },
+      getWorkDirForChannel: (channelId) => channelBindings.getWorkDir(channelId),
     },
     {
       getController: () => claudeController,
@@ -287,6 +295,10 @@ export async function createClaudeCodeBot(config: BotConfig) {
     healthMonitor,
     botSettings,
     cleanupInterval,
+    bindCommandHandlers: createBindCommandHandlers({
+      channelBindings,
+      globalWorkDir: workDir,
+    }),
   });
 
   // Create button handlers using the button handler factory

@@ -35,6 +35,9 @@ export interface CommandWrapperDeps {
   botSettings: { mentionEnabled: boolean; mentionUserId: string | null };
   /** Cleanup interval ID */
   cleanupInterval: number;
+  /** Optional /bind, /unbind, /bindings command handlers.
+   *  When omitted, those slash commands are simply not registered. */
+  bindCommandHandlers?: CommandHandlers;
 }
 
 // ================================
@@ -603,6 +606,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
     ...gitHandlers,
     ...shellHandlers,
     ...utilityHandlers,
+    ...(deps.bindCommandHandlers ?? new Map()),
   ]);
 
   return commandHandlers;

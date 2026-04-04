@@ -114,3 +114,18 @@ export {
   createShellCommandHandlers,
   createUtilityCommandHandlers,
 } from "./git-shell-handlers.ts";
+
+// Channel bindings (per-channel project directory map)
+export {
+  type ProjectConfig,
+  type BindValidation,
+  ChannelBindingManager,
+  validateBindPath,
+} from "./channel-bindings.ts";
+
+// /bind, /unbind, /bindings slash commands
+export {
+  type BindHandlerDeps,
+  bindCommands,
+  createBindCommandHandlers,
+} from "./bind-commands.ts";
