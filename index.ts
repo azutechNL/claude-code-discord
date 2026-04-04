@@ -19,7 +19,12 @@ import {
   type MessageContent,
   SessionThreadManager,
 } from "./discord/index.ts";
-import type { TextChannel } from "npm:discord.js@14.14.1";
+import { Events, type TextChannel } from "npm:discord.js@14.14.1";
+import {
+  initAllPersistence,
+  getChannelSessionsManager,
+  getThreadSessionsManager,
+} from "./util/persistence.ts";
 
 import { getGitInfo } from "./git/index.ts";
 import { createClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks } from "./claude/index.ts";
@@ -103,6 +108,14 @@ export async function createClaudeCodeBot(config: BotConfig) {
 
   const { shellManager, worktreeBotManager, crashHandler, healthMonitor, claudeSessionManager } = managers;
 
+  // Initialize persistence managers (channel sessions, thread bindings, channel→project map)
+  await initAllPersistence();
+  const channelSessionsPersister = getChannelSessionsManager();
+  const threadSessionsPersister = getThreadSessionsManager();
+
+  // Load previously-persisted channel→session mappings so /claude resumes after restart
+  const initialChannelSessions = await channelSessionsPersister.load({});
+
   // Initialize dynamic model fetching (uses ANTHROPIC_API_KEY if available)
   initModels();
 
@@ -122,8 +135,10 @@ export async function createClaudeCodeBot(config: BotConfig) {
   let bot: any;
   let claudeSender: ((messages: ClaudeMessage[]) => Promise<void>) | null = null;
 
-  // Session thread manager — maps each Claude session to a dedicated Discord thread
-  const sessionThreadManager = new SessionThreadManager();
+  // Session thread manager — maps each Claude session to a dedicated Discord thread.
+  // Passes a persister so thread bindings survive container restarts.
+  const sessionThreadManager = new SessionThreadManager(threadSessionsPersister);
+  await sessionThreadManager.loadPersisted();
 
   // Session thread callbacks — used by claude/command.ts for /claude-thread and /resume.
   // The callbacks are closures over `bot` (late-bound) and `sessionThreadManager`.
@@ -246,6 +261,12 @@ export async function createClaudeCodeBot(config: BotConfig) {
         }
       },
       sessionThreads: sessionThreadCallbacks,
+      initialChannelSessions,
+      persistChannelSessions: (snapshot) => {
+        channelSessionsPersister
+          .save(snapshot)
+          .catch((err) => console.error('[index] persistChannelSessions failed:', err));
+      },
     },
     {
       getController: () => claudeController,
@@ -331,6 +352,21 @@ export async function createClaudeCodeBot(config: BotConfig) {
 
   // Create Discord bot
   bot = await createDiscordBot(config, handlers, buttonHandlers, dependencies, crashHandler);
+
+  // Restore ThreadChannel references for loaded session threads once the
+  // Discord client is ready. Runs immediately if the client is already ready.
+  const restoreThreadChannels = async () => {
+    try {
+      await sessionThreadManager.restoreChannels(bot.client);
+    } catch (err) {
+      console.error('[index] Failed to restore session thread channels:', err);
+    }
+  };
+  if (bot.client.isReady()) {
+    restoreThreadChannels();
+  } else {
+    bot.client.once(Events.ClientReady, restoreThreadChannels);
+  }
 
   // Create Discord sender for Claude messages
   claudeSender = createClaudeSender(createDiscordSenderAdapter(bot));

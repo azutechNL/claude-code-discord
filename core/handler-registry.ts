@@ -181,6 +181,16 @@ export interface HandlerRegistryDeps {
   /** Thread-per-session callbacks (optional). When provided, each /claude
    *  invocation creates a dedicated Discord thread for its output. */
   sessionThreads?: SessionThreadCallbacks;
+  /** channelId → sessionId map loaded from persistence at startup.
+   *  Hydrates channelSessionMap so /claude resumes prior sessions after restart. */
+  initialChannelSessions?: Record<string, string>;
+  /** Called on every channelSessionMap mutation — wire to PersistenceManager.save().
+   *  Fire-and-forget; failures should be logged, not thrown. */
+  persistChannelSessions?: (snapshot: Record<string, string>) => void;
+  /** Per-channel project binding lookup. When provided, /claude resolves its
+   *  working directory from this for the invoking channel, falling back to
+   *  the global workDir when the channel has no binding. */
+  getWorkDirForChannel?: (channelId: string) => string | undefined;
 }
 
 /**
@@ -507,11 +517,29 @@ export function createAllHandlers(
     return opts;
   }
 
-  // Per-channel session tracking — maps channelId/threadId to active sessionId
+  // Per-channel session tracking — maps channelId/threadId to active sessionId.
+  // Hydrated from persistence at startup so `/claude` resumes after restarts.
   const channelSessionMap = new Map<string, string>();
+  if (deps.initialChannelSessions) {
+    for (const [cid, sid] of Object.entries(deps.initialChannelSessions)) {
+      channelSessionMap.set(cid, sid);
+    }
+    const loaded = channelSessionMap.size;
+    if (loaded > 0) {
+      console.log(`[handler-registry] Hydrated ${loaded} channel→session mapping(s) from persistence`);
+    }
+  }
+
+  // Snapshot current map into a plain object for persistence.
+  const snapshotChannelSessions = (): Record<string, string> => {
+    const obj: Record<string, string> = {};
+    for (const [cid, sid] of channelSessionMap) obj[cid] = sid;
+    return obj;
+  };
 
   const claudeHandlers = createClaudeHandlers({
     workDir,
+    getWorkDirForChannel: deps.getWorkDirForChannel,
     getClaudeController: claudeSession.getController,
     setClaudeController: claudeSession.setController,
     getSessionForChannel: (channelId: string) => channelSessionMap.get(channelId),
@@ -521,6 +549,7 @@ export function createAllHandlers(
       } else {
         channelSessionMap.delete(channelId);
       }
+      deps.persistChannelSessions?.(snapshotChannelSessions());
     },
     getClaudeSessionId: claudeSession.getSessionId,
     setClaudeSessionId: claudeSession.setSessionId,

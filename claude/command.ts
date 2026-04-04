@@ -74,6 +74,9 @@ export const claudeCommands = [
 
 export interface ClaudeHandlerDeps {
   workDir: string;
+  /** Per-channel working-directory resolver. Returns the channel's bound
+   *  project directory, or undefined to fall back to the global workDir. */
+  getWorkDirForChannel?: (channelId: string) => string | undefined;
   getClaudeController: () => AbortController | null;
   setClaudeController: (controller: AbortController | null) => void;
   /** Get session ID for a specific channel/thread (per-channel tracking) */
@@ -94,6 +97,11 @@ export interface ClaudeHandlerDeps {
 
 export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
   const { workDir, sendClaudeMessages } = deps;
+
+  /** Resolve the working directory for a given channel, falling back to global workDir. */
+  const resolveWorkDir = (channelId: string): string => {
+    return deps.getWorkDirForChannel?.(channelId) ?? workDir;
+  };
 
   return {
     /**
@@ -142,7 +150,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       });
 
       const result = await sendToClaudeCode(
-        workDir,
+        resolveWorkDir(channelId),
         prompt,
         controller,
         activeSessionId, // resume if present, new session if undefined
@@ -169,9 +177,14 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
 
     /**
      * /claude-thread — Start a brand-new session in a dedicated Discord thread.
+     * The new thread inherits the invoking channel's project binding (if any).
      */
     // deno-lint-ignore no-explicit-any
     async onClaudeThread(ctx: any, prompt: string, threadName?: string): Promise<ClaudeResponse> {
+      // Resolve the invoking channel so the spawned thread inherits its project binding.
+      const invokingChannelId: string = typeof ctx?.getChannelId === 'function'
+        ? ctx.getChannelId()
+        : '';
       const existingController = deps.getClaudeController();
       if (existingController) {
         existingController.abort();
@@ -211,7 +224,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       });
 
       const result = await sendToClaudeCode(
-        workDir,
+        resolveWorkDir(invokingChannelId),
         prompt,
         controller,
         undefined, // always a new session

@@ -194,10 +194,54 @@ export interface BotPersistentData {
   version: string;
 }
 
+/**
+ * Channel → session ID mapping, serialized as a plain object.
+ * Survives container restarts so `/claude` can resume the last active
+ * session for each channel without the user re-supplying a session ID.
+ */
+export type ChannelSessionMapData = Record<string, string>;
+
+/**
+ * Snapshot of a SessionThreadManager entry suitable for JSON persistence.
+ * Dates are stored as ISO strings; ThreadChannel references are re-fetched
+ * from Discord at boot using `threadId`.
+ */
+export interface PersistedThreadSession {
+  sessionId: string;
+  threadId: string;
+  threadName: string;
+  createdAt: string;
+  lastActivity: string;
+  messageCount: number;
+  /** Discord channel ID of the parent text/forum channel — used to re-fetch ThreadChannel. */
+  parentChannelId?: string;
+}
+
+/**
+ * Per-channel project binding. Allows each Discord channel to have its own
+ * working directory for Claude operations, overriding the global WORK_DIR.
+ */
+export interface ProjectConfig {
+  /** Absolute working directory Claude operates in for this channel. */
+  workDir: string;
+  /** ISO timestamp when the binding was created. */
+  boundAt: string;
+  /** Discord user ID that created the binding. */
+  boundBy: string;
+  /** Optional human-readable label shown in /bindings list. */
+  label?: string;
+}
+
+/** channelId → ProjectConfig, serialized as a plain object. */
+export type ChannelBindingsData = Record<string, ProjectConfig>;
+
 // Singleton persistence managers
 let todosManager: PersistenceManager<TodoItem[]> | null = null;
 let mcpServersManager: PersistenceManager<MCPServerConfig[]> | null = null;
 let agentSessionsManager: PersistenceManager<AgentSessionData[]> | null = null;
+let channelSessionsManager: PersistenceManager<ChannelSessionMapData> | null = null;
+let threadSessionsManager: PersistenceManager<PersistedThreadSession[]> | null = null;
+let channelBindingsManager: PersistenceManager<ChannelBindingsData> | null = null;
 
 /**
  * Get or create the todos persistence manager
@@ -230,6 +274,41 @@ export function getAgentSessionsManager(dataDir?: string): PersistenceManager<Ag
 }
 
 /**
+ * Get or create the channel→session mapping persistence manager.
+ * Persists which Claude session is active for each Discord channel so
+ * `/claude` continues the same session after container restarts.
+ */
+export function getChannelSessionsManager(dataDir?: string): PersistenceManager<ChannelSessionMapData> {
+  if (!channelSessionsManager) {
+    channelSessionsManager = new PersistenceManager<ChannelSessionMapData>("channel-sessions", { dataDir });
+  }
+  return channelSessionsManager;
+}
+
+/**
+ * Get or create the thread-session persistence manager.
+ * Persists SessionThreadManager metadata so Discord thread bindings
+ * survive restarts. Thread channel references are re-fetched at boot.
+ */
+export function getThreadSessionsManager(dataDir?: string): PersistenceManager<PersistedThreadSession[]> {
+  if (!threadSessionsManager) {
+    threadSessionsManager = new PersistenceManager<PersistedThreadSession[]>("thread-sessions", { dataDir });
+  }
+  return threadSessionsManager;
+}
+
+/**
+ * Get or create the channel-bindings persistence manager.
+ * Persists per-channel ProjectConfig so /bind survives restarts.
+ */
+export function getChannelBindingsManager(dataDir?: string): PersistenceManager<ChannelBindingsData> {
+  if (!channelBindingsManager) {
+    channelBindingsManager = new PersistenceManager<ChannelBindingsData>("channel-bindings", { dataDir });
+  }
+  return channelBindingsManager;
+}
+
+/**
  * Initialize all persistence managers
  */
 export async function initAllPersistence(dataDir?: string): Promise<void> {
@@ -237,6 +316,9 @@ export async function initAllPersistence(dataDir?: string): Promise<void> {
     getTodosManager(dataDir),
     getMCPServersManager(dataDir),
     getAgentSessionsManager(dataDir),
+    getChannelSessionsManager(dataDir),
+    getThreadSessionsManager(dataDir),
+    getChannelBindingsManager(dataDir),
   ];
 
   await Promise.all(managers.map(m => m.init()));
