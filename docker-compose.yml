@@ -78,11 +78,57 @@ services:
     networks:
       - claude-network
 
+  # ────────────────────────────────────────────────────────────────────
+  # Optional: Claude Code monitoring dashboards (sidecars).
+  # The bot's hook-forwarder POSTs events to both on the claude-network.
+  # Access the UIs at:
+  #   http://localhost:4820  (Claude-Code-Agent-Monitor, hoangsonww)
+  #   http://localhost:4981  (agents-observe, simple10)
+  # ────────────────────────────────────────────────────────────────────
+
+  agent-monitor:
+    build:
+      context: https://github.com/hoangsonww/Claude-Code-Agent-Monitor.git
+    container_name: agent-monitor
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DASHBOARD_PORT=4820
+      - DASHBOARD_DB_PATH=/app/data/dashboard.db
+    volumes:
+      - agent-monitor-data:/app/data
+    ports:
+      - "4820:4820"
+    networks:
+      - claude-network
+
+  agents-observe:
+    image: ghcr.io/simple10/agents-observe:v0.7.4
+    container_name: agents-observe
+    restart: unless-stopped
+    environment:
+      - AGENTS_OBSERVE_SERVER_PORT=4981
+      - AGENTS_OBSERVE_DB_PATH=/data/observe.db
+      - AGENTS_OBSERVE_CLIENT_DIST_PATH=/app/client/dist
+      - AGENTS_OBSERVE_RUNTIME=docker
+      - AGENTS_OBSERVE_STORAGE_ADAPTER=sqlite
+      - AGENTS_OBSERVE_LOG_LEVEL=info
+    volumes:
+      - agents-observe-data:/data
+    ports:
+      - "4981:4981"
+    networks:
+      - claude-network
+
 # Named volumes for data persistence
 volumes:
   bot-data:
     driver: local
   claude-config:
+    driver: local
+  agent-monitor-data:
+    driver: local
+  agents-observe-data:
     driver: local
 
 # Network configuration
