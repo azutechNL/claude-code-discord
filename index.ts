@@ -30,6 +30,7 @@ import {
   ChannelBindingManager,
   createBindCommandHandlers,
   PersonaManager,
+  createPersonaCommandHandlers,
   mergePersonaIntoOptions,
 } from "./core/index.ts";
 import type { ClaudeModelOptions } from "./claude/index.ts";
@@ -309,6 +310,11 @@ export async function createClaudeCodeBot(config: BotConfig) {
     botSettings,
     cleanupInterval,
     bindCommandHandlers: createBindCommandHandlers({
+      channelBindings,
+      globalWorkDir: workDir,
+    }),
+    personaCommandHandlers: createPersonaCommandHandlers({
+      personaManager,
       channelBindings,
       globalWorkDir: workDir,
     }),

@@ -38,6 +38,8 @@ export interface CommandWrapperDeps {
   /** Optional /bind, /unbind, /bindings command handlers.
    *  When omitted, those slash commands are simply not registered. */
   bindCommandHandlers?: CommandHandlers;
+  /** Optional /persona command handlers. When omitted, /persona is not registered. */
+  personaCommandHandlers?: CommandHandlers;
 }
 
 // ================================
@@ -607,6 +609,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
     ...shellHandlers,
     ...utilityHandlers,
     ...(deps.bindCommandHandlers ?? new Map()),
+    ...(deps.personaCommandHandlers ?? new Map()),
   ]);
 
   return commandHandlers;

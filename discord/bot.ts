@@ -246,7 +246,22 @@ export async function createDiscordBot(
 
       getChannelId(): string {
         return interaction.channelId ?? '';
-      }
+      },
+
+      getSubcommand(required?: boolean): string | null {
+        if (interaction.isCommand && interaction.isCommand()) {
+          // deno-lint-ignore no-explicit-any
+          const opts = (interaction as any).options;
+          if (opts && typeof opts.getSubcommand === 'function') {
+            try {
+              return opts.getSubcommand(required ?? false);
+            } catch {
+              return null;
+            }
+          }
+        }
+        return null;
+      },
     };
   }
 

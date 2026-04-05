@@ -28,6 +28,7 @@ import { agentCommand, createAgentHandlers } from "../agent/index.ts";
 import { screenshotCommands, createScreenshotHandlers } from "../screenshot/index.ts";
 import { infoCommands, createInfoCommandHandlers } from "../claude/index.ts";
 import { bindCommands } from "./bind-commands.ts";
+import { personaCommands } from "./persona-commands.ts";
 import { cleanSessionId, ClaudeSessionManager } from "../claude/index.ts";
 import type { SessionThreadCallbacks } from "../claude/index.ts";
 import type { ClaudeModelOptions } from "../claude/index.ts";
@@ -722,6 +723,7 @@ export function getAllCommands() {
     ...screenshotCommands,
     ...infoCommands,
     ...bindCommands,
+    ...personaCommands,
     helpCommand,
   ];
 }

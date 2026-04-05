@@ -51,6 +51,8 @@ export interface InteractionContext {
   getUserId(): string;
   /** Returns the channel or thread ID the interaction was sent in */
   getChannelId(): string;
+  /** Returns the invoked subcommand name (for commands that declare subcommands). */
+  getSubcommand(required?: boolean): string | null;
 }
 
 export interface BotConfig {

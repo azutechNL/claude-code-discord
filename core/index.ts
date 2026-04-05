@@ -137,3 +137,10 @@ export {
   bindCommands,
   createBindCommandHandlers,
 } from "./bind-commands.ts";
+
+// /persona slash commands
+export {
+  type PersonaHandlerDeps,
+  personaCommands,
+  createPersonaCommandHandlers,
+} from "./persona-commands.ts";
