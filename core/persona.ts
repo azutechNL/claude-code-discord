@@ -49,6 +49,10 @@ export interface PersonaConfig {
   plugins?: { type: "local"; path: string }[];
   /** Named skills to enable (plugin/skill-name syntax). */
   skills?: string[];
+  /** If true, the bot injects the in-process OpenClaw MCP server into
+   *  this persona's mcpServers map so Claude can delegate tasks to
+   *  local OpenClaw agents. Requires OPENCLAW_BRIDGE_URL + _TOKEN env. */
+  enableOpenclaw?: boolean;
 }
 
 /**

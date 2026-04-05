@@ -43,6 +43,8 @@ services:
       - CATEGORY_NAME=${CATEGORY_NAME:-claude-code}
       - MONITOR_CHANNEL_ID=${MONITOR_CHANNEL_ID:-}
       - MONITOR_BOT_IDS=${MONITOR_BOT_IDS:-}
+      - OPENCLAW_BRIDGE_URL=${OPENCLAW_BRIDGE_URL:-http://host.docker.internal:8901}
+      - OPENCLAW_BRIDGE_TOKEN=${OPENCLAW_BRIDGE_TOKEN:-}
 
     # Volume mounts for persistence and workspace access
     volumes:
@@ -77,6 +79,10 @@ services:
     # Network mode
     networks:
       - claude-network
+
+    # Allow reaching services running on the host (e.g. OpenClaw bridge at :8901)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ────────────────────────────────────────────────────────────────────
   # Optional: Claude Code monitoring dashboards (sidecars).

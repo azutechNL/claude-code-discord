@@ -11,6 +11,11 @@ export {
   getDashboardEndpoints,
   mergeHooks,
 } from "./dashboard-hooks.ts";
+export {
+  type OpenclawBridgeConfig,
+  buildOpenclawMcpServer,
+  getOpenclawBridgeConfig,
+} from "./openclaw-mcp.ts";
 export { convertToClaudeMessages } from "./message-converter.ts";
 export {
   enhancedClaudeCommands,

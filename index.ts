@@ -36,7 +36,7 @@ import {
 import type { ClaudeModelOptions } from "./claude/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
-import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks, buildDashboardHooks, getDashboardEndpoints, mergeHooks } from "./claude/index.ts";
+import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks, buildDashboardHooks, getDashboardEndpoints, mergeHooks, buildOpenclawMcpServer } from "./claude/index.ts";
 import { buildQuestionMessages, parseAskUserButtonId, parseAskUserConfirmId, type AskUserQuestionInput } from "./claude/index.ts";
 import { buildPermissionEmbed, parsePermissionButtonId, type PermissionRequestCallback } from "./claude/index.ts";
 import { claudeCommands, enhancedClaudeCommands } from "./claude/index.ts";
@@ -136,6 +136,16 @@ export async function createClaudeCodeBot(config: BotConfig) {
     (Deno.env.get("DOCKER_CONTAINER") ? "/app/personas" : `${Deno.cwd()}/personas`);
   const personaManager = new PersonaManager(personasDir);
   await personaManager.load();
+
+  // OpenClaw delegation MCP server — built once, injected into any
+  // persona that has enableOpenclaw: true. No-op when the bridge env
+  // vars are unset.
+  const openclawMcpServer = buildOpenclawMcpServer();
+  if (openclawMcpServer) {
+    console.log("[openclaw] in-process MCP server ready (enable via persona.enableOpenclaw)");
+  } else {
+    console.log("[openclaw] bridge not configured — OPENCLAW_BRIDGE_URL/TOKEN missing");
+  }
 
   // Initialize dynamic model fetching (uses ANTHROPIC_API_KEY if available)
   initModels();
@@ -415,6 +425,14 @@ export async function createClaudeCodeBot(config: BotConfig) {
     const modelOptions: ClaudeModelOptions = persona
       ? mergePersonaIntoOptions({}, persona)
       : {};
+
+    // Inject the in-process OpenClaw MCP server when the persona opts in.
+    if (persona?.enableOpenclaw && openclawMcpServer) {
+      modelOptions.mcpServers = {
+        ...(modelOptions.mcpServers ?? {}),
+        openclaw: openclawMcpServer,
+      };
+    }
 
     // Attach dashboard-forwarding hooks (fires fire-and-forget HTTP POSTs
     // to agent-monitor + agents-observe sidecars). No-op if disabled.
