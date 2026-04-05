@@ -23,8 +23,14 @@ RUN apt-get update && \
 RUN groupadd -r -g ${GROUP_ID} claude && \
     useradd -r -u ${USER_ID} -g claude -m claude
 
-# Install Claude Code CLI globally via npm
-RUN npm install -g @anthropic-ai/claude-code && \
+# Install Claude Code CLI globally via npm.
+# CLAUDE_CLI_VERSION pins a specific version (set in .env or compose),
+# or use CLAUDE_BUILD_STAMP to force a fresh install of @latest by
+# passing a changing value (e.g. `--build-arg CLAUDE_BUILD_STAMP=$(date +%s)`).
+ARG CLAUDE_CLI_VERSION=latest
+ARG CLAUDE_BUILD_STAMP=unknown
+RUN echo "claude-cli install: version=${CLAUDE_CLI_VERSION} stamp=${CLAUDE_BUILD_STAMP}" && \
+    npm install -g @anthropic-ai/claude-code@${CLAUDE_CLI_VERSION} && \
     npm cache clean --force
 
 # Verify claude binary is accessible
