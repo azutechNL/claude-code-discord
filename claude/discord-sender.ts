@@ -7,6 +7,26 @@ export interface DiscordSender {
   sendMessage(content: MessageContent): Promise<void>;
 }
 
+/**
+ * Minimal, conversational sender: renders only Claude's final text answer as
+ * plain markdown (no colored embeds, no tool-use chatter, no thinking blocks,
+ * no system noise). Best for forum threads and ambient messaging where users
+ * want a chat-native feel. Callers typically append a subtext footer with
+ * session_id / model / duration / cost after the query completes.
+ */
+export function createQuietClaudeSender(sender: DiscordSender) {
+  return async function sendClaudeMessages(messages: ClaudeMessage[]) {
+    for (const msg of messages) {
+      if (msg.type !== 'text') continue;
+      // Chunk at 1900 to leave headroom for follow-up footer in the same thread.
+      const chunks = splitText(msg.content, 1900);
+      for (const chunk of chunks) {
+        await sender.sendMessage({ content: chunk });
+      }
+    }
+  };
+}
+
 // Store full content for expand functionality
 export const expandableContent = new Map<string, string>();
 

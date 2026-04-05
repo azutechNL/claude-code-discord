@@ -19,7 +19,7 @@ import {
   type MessageContent,
   SessionThreadManager,
 } from "./discord/index.ts";
-import { Events, type TextChannel } from "npm:discord.js@14.14.1";
+import { Events, ChannelType, type TextChannel } from "npm:discord.js@14.14.1";
 import {
   initAllPersistence,
   getChannelSessionsManager,
@@ -29,7 +29,7 @@ import {
 import { ChannelBindingManager, createBindCommandHandlers } from "./core/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
-import { createClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks } from "./claude/index.ts";
+import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks } from "./claude/index.ts";
 import { buildQuestionMessages, parseAskUserButtonId, parseAskUserConfirmId, type AskUserQuestionInput } from "./claude/index.ts";
 import { buildPermissionEmbed, parsePermissionButtonId, type PermissionRequestCallback } from "./claude/index.ts";
 import { claudeCommands, enhancedClaudeCommands } from "./claude/index.ts";
@@ -330,19 +330,72 @@ export async function createClaudeCodeBot(config: BotConfig) {
     console.log(`[index] ALLOWED_CHANNEL_IDS: ${allowedChannelIds.size} channel(s) allowed`);
   }
 
+  /**
+   * A channel/thread is in "quiet" mode when it's inside a Discord Forum —
+   * users chat conversationally there and don't want tool-use chatter or
+   * colored embeds. We detect by walking up to the parent channel.
+   */
+  // deno-lint-ignore no-explicit-any
+  const isForumContext = (channel: any): boolean => {
+    const parent = channel?.parent;
+    if (!parent) return false;
+    if (parent.type === ChannelType.GuildForum) return true;
+    // Thread nested under a channel whose own parent is a forum (unusual but possible).
+    return parent.parent?.type === ChannelType.GuildForum;
+  };
+
+  /**
+   * Build a Claude-CLI-style subtext footer. Discord renders leading `-# ` as
+   * small dim text, so this reads as a status strip under the reply.
+   */
+  const buildFooter = (r: {
+    sessionId?: string;
+    modelUsed?: string;
+    duration?: number;
+    cost?: number;
+  }): string => {
+    const parts: string[] = [];
+    if (r.sessionId) parts.push(`session \`${r.sessionId.slice(0, 8)}\``);
+    if (r.modelUsed && r.modelUsed !== 'Default') parts.push(r.modelUsed);
+    if (typeof r.duration === 'number') parts.push(`${(r.duration / 1000).toFixed(1)}s`);
+    if (typeof r.cost === 'number' && r.cost > 0) parts.push(`$${r.cost.toFixed(4)}`);
+    return parts.length > 0 ? `-# ${parts.join(' · ')}` : '';
+  };
+
   // Shared helper: run a prompt against Claude scoped to a specific channel.
   // Resolves the channel's bound workDir (falling back to global), resumes an
   // existing session if one exists, otherwise starts a fresh one. Streams
   // output back via a sender bound to the given Discord channel/thread.
-  // deno-lint-ignore no-explicit-any
-  const runPromptInChannel = async (channel: any, channelId: string, prompt: string): Promise<string | undefined> => {
+  // In forum contexts uses a plain-markdown "quiet" sender and appends a
+  // CLI-style subtext footer with session_id / model / duration / cost.
+  const runPromptInChannel = async (
+    // deno-lint-ignore no-explicit-any
+    channel: any,
+    channelId: string,
+    prompt: string,
+    opts: {
+      /** Override quiet detection. Default: derived from forum-context check. */
+      quiet?: boolean;
+      /** Message to react ⏳/✅ on for visual ack. */
+      // deno-lint-ignore no-explicit-any
+      triggerMessage?: any;
+    } = {},
+  ): Promise<string | undefined> => {
+    const quiet = opts.quiet ?? isForumContext(channel);
     const channelWorkDir = channelBindings.getWorkDir(channelId) ?? workDir;
     const existingSessionId = allHandlers.claude.getSessionForChannel(channelId);
-    const sender = createClaudeSender(createChannelSenderAdapter(channel));
+    const adapter = createChannelSenderAdapter(channel);
+    const sender = quiet ? createQuietClaudeSender(adapter) : createClaudeSender(adapter);
     const controller = new AbortController();
+
+    // Visual ack: ⏳ on user's message. Best-effort, never throws.
+    const react = async (emoji: string) => {
+      try { await opts.triggerMessage?.react?.(emoji); } catch { /* ignore */ }
+    };
+    await react('⏳');
+    try { await channel.sendTyping?.(); } catch { /* ignore */ }
+
     try {
-      // Typing indicator for UX — best-effort, no-op if unsupported.
-      try { await channel.sendTyping?.(); } catch { /* ignore */ }
       const result = await sendToClaudeCode(
         channelWorkDir,
         prompt,
@@ -358,9 +411,17 @@ export async function createClaudeCodeBot(config: BotConfig) {
       if (result.sessionId) {
         allHandlers.claude.setSessionForChannel(channelId, result.sessionId);
       }
+      if (quiet) {
+        const footer = buildFooter(result);
+        if (footer) {
+          try { await channel.send({ content: footer }); } catch { /* ignore */ }
+        }
+      }
+      await react('✅');
       return result.sessionId;
     } catch (err) {
       console.error(`[runPromptInChannel] query failed for channel ${channelId}:`, err);
+      await react('❌');
       return undefined;
     }
   };
@@ -398,36 +459,30 @@ export async function createClaudeCodeBot(config: BotConfig) {
 
     // Fetch the forum post body — wait briefly because Discord populates it async.
     let starterContent = "";
+    // deno-lint-ignore no-explicit-any
+    let starterMessage: any = null;
     try {
-      const starter = await thread.fetchStarterMessage();
-      starterContent = starter?.content?.trim() ?? "";
+      starterMessage = await thread.fetchStarterMessage();
+      starterContent = starterMessage?.content?.trim() ?? "";
     } catch {
       // Forum posts without body, or fetch timing issue — treat as empty.
     }
 
-    // Send a welcome embed so the user knows the bot is engaged.
-    // deno-lint-ignore no-explicit-any
-    await sendMessageContent(thread as any, {
-      embeds: [{
-        color: 0x5865f2,
-        title: "🧵 Forum session started",
-        description: [
-          `Working directory: \`${threadWorkDir}\``,
-          starterContent
-            ? "Processing your post as the first prompt…"
-            : "Waiting for your first `/claude` in this thread.",
-        ].join("\n"),
-        timestamp: true,
-      }],
-    });
-
-    // If there's a starter prompt, run it as the first query.
+    // If there's a starter prompt, run it as the first query in quiet mode.
+    // No welcome embed — the user will see ⏳ on their post, the response,
+    // and the footer. Clean chat-native UX.
     if (starterContent) {
-      const sessionId = await runPromptInChannel(thread, thread.id, starterContent);
+      const sessionId = await runPromptInChannel(thread, thread.id, starterContent, {
+        triggerMessage: starterMessage,
+      });
       if (sessionId) {
         // Promote placeholder → real session ID in SessionThreadManager
         sessionThreadManager.updateSessionId(placeholderKey, sessionId);
       }
+    } else {
+      // Empty forum post — send a single subtext line indicating we're ready.
+      // deno-lint-ignore no-explicit-any
+      try { await (thread as any).send?.({ content: `-# 🧵 session ready · workDir \`${threadWorkDir}\`` }); } catch { /* ignore */ }
     }
   };
 
@@ -439,7 +494,12 @@ export async function createClaudeCodeBot(config: BotConfig) {
     channel: any;
     content: string;
   }) => {
-    await runPromptInChannel(message.channel, message.channelId, message.content);
+    await runPromptInChannel(
+      message.channel,
+      message.channelId,
+      message.content,
+      { triggerMessage: message },
+    );
   };
 
   // Create dependencies object for Discord bot
