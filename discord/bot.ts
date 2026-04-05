@@ -528,17 +528,26 @@ export async function createDiscordBot(
   const rest = new REST({ version: '10' }).setToken(discordToken);
   const commandBodies = commands.map((cmd) => cmd.toJSON());
 
-  try {
+  // Fire global registration with a hard timeout. Global commands are
+  // eventually-consistent and non-critical (guild-scoped registration
+  // in the ready handler below is the canonical path). Discord sometimes
+  // hangs this endpoint under rate pressure, so we never let it block
+  // the bot from coming online.
+  (async () => {
     console.log('Registering global slash commands (eventual propagation)...');
-    await rest.put(
-      Routes.applicationCommands(applicationId),
-      { body: commandBodies },
-    );
-    console.log('Global slash commands registered');
-  } catch (error) {
-    console.error('Failed to register global slash commands:', error);
-    throw error;
-  }
+    try {
+      await Promise.race([
+        rest.put(Routes.applicationCommands(applicationId), { body: commandBodies }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('global registration timed out after 15s')), 15000)
+        ),
+      ]);
+      console.log('Global slash commands registered');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[bot] Skipping global slash commands: ${msg}`);
+    }
+  })();
 
   // Event handlers
   client.once(Events.ClientReady, async () => {
