@@ -123,6 +123,14 @@ export {
   validateBindPath,
 } from "./channel-bindings.ts";
 
+// Per-channel persona presets
+export {
+  type PersonaConfig,
+  type LoadedPersona,
+  PersonaManager,
+  mergePersonaIntoOptions,
+} from "./persona.ts";
+
 // /bind, /unbind, /bindings slash commands
 export {
   type BindHandlerDeps,

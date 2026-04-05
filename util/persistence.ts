@@ -230,6 +230,9 @@ export interface ProjectConfig {
   boundBy: string;
   /** Optional human-readable label shown in /bindings list. */
   label?: string;
+  /** Name of the persona preset attached to this channel (without .json).
+   *  Resolved against personas/*.json on every Claude query. */
+  personaName?: string;
 }
 
 /** channelId → ProjectConfig, serialized as a plain object. */

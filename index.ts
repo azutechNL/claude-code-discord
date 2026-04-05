@@ -26,7 +26,13 @@ import {
   getThreadSessionsManager,
   getChannelBindingsManager,
 } from "./util/persistence.ts";
-import { ChannelBindingManager, createBindCommandHandlers } from "./core/index.ts";
+import {
+  ChannelBindingManager,
+  createBindCommandHandlers,
+  PersonaManager,
+  mergePersonaIntoOptions,
+} from "./core/index.ts";
+import type { ClaudeModelOptions } from "./claude/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
 import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks } from "./claude/index.ts";
@@ -122,6 +128,13 @@ export async function createClaudeCodeBot(config: BotConfig) {
   // Per-channel project binding manager (hydrated from .bot-data/channel-bindings.json)
   const channelBindings = new ChannelBindingManager(channelBindingsPersister);
   await channelBindings.load();
+
+  // Persona registry — loads personas/*.json presets at startup.
+  // Resolves from PERSONAS_DIR env (or /app/personas in Docker, ~/claude-discord/personas otherwise).
+  const personasDir = Deno.env.get("PERSONAS_DIR") ??
+    (Deno.env.get("DOCKER_CONTAINER") ? "/app/personas" : `${Deno.cwd()}/personas`);
+  const personaManager = new PersonaManager(personasDir);
+  await personaManager.load();
 
   // Initialize dynamic model fetching (uses ANTHROPIC_API_KEY if available)
   initModels();
@@ -382,11 +395,20 @@ export async function createClaudeCodeBot(config: BotConfig) {
     } = {},
   ): Promise<string | undefined> => {
     const quiet = opts.quiet ?? isForumContext(channel);
-    const channelWorkDir = channelBindings.getWorkDir(channelId) ?? workDir;
+    const binding = channelBindings.get(channelId);
+    const channelWorkDir = binding?.workDir ?? workDir;
     const existingSessionId = allHandlers.claude.getSessionForChannel(channelId);
     const adapter = createChannelSenderAdapter(channel);
     const sender = quiet ? createQuietClaudeSender(adapter) : createClaudeSender(adapter);
     const controller = new AbortController();
+
+    // Resolve the persona (if any) attached to this channel and merge its
+    // fields into the ClaudeModelOptions. Anything the persona doesn't
+    // set falls through to bot/global defaults.
+    const persona = binding?.personaName ? personaManager.get(binding.personaName) : undefined;
+    const modelOptions: ClaudeModelOptions = persona
+      ? mergePersonaIntoOptions({}, persona)
+      : {};
 
     // Visual ack: ⏳ on user's message. Best-effort, never throws.
     const react = async (emoji: string) => {
@@ -407,6 +429,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
           if (msgs.length > 0) sender(msgs).catch(() => {});
         },
         false,
+        modelOptions,
       );
       if (result.sessionId) {
         allHandlers.claude.setSessionForChannel(channelId, result.sessionId);

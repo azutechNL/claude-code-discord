@@ -108,6 +108,15 @@ export interface ClaudeModelOptions {
   agent?: string;
   /** Custom subagent definitions — Record<name, AgentDefinition> */
   agents?: Record<string, SDKAgentDefinition>;
+  /** Tool allowlist (e.g. ["Read", "Write", "WebFetch"]). When set, only
+   *  these tools can be invoked. Merged with MCP tool prefixes automatically. */
+  allowedTools?: string[];
+  /** Tool denylist; takes precedence over allowedTools. */
+  disallowedTools?: string[];
+  /** Additional MCP servers to register for this query, merged with any
+   *  servers loaded from `<workDir>/.claude/mcp.json`. Persona entries
+   *  override same-named entries from disk. */
+  mcpServers?: Record<string, McpServerConfig>;
   /** Enable beta features (e.g. 1M context window) */
   betas?: SdkBeta[];
   /** Enable file checkpointing for undo/rewind */
@@ -181,8 +190,12 @@ export async function sendToClaudeCode(
   // Clean up session ID
   const cleanedSessionId = sessionId ? cleanSessionId(sessionId) : undefined;
   
-  // Load MCP servers from .claude/mcp.json
-  const mcpServers = await loadMcpServers(workDir);
+  // Load MCP servers from .claude/mcp.json, then layer persona-supplied
+  // mcpServers on top (persona entries override same-named disk entries).
+  const diskMcpServers = await loadMcpServers(workDir);
+  const mcpServers = (diskMcpServers || modelOptions?.mcpServers)
+    ? { ...(diskMcpServers ?? {}), ...(modelOptions?.mcpServers ?? {}) }
+    : undefined;
 
   // Build set of MCP server name prefixes for auto-allowing MCP tools
   const mcpToolPrefixes = mcpServers
@@ -243,6 +256,9 @@ export async function sendToClaudeCode(
           // Native SDK agent support
           ...(modelOptions?.agents && { agents: modelOptions.agents }),
           ...(modelOptions?.agent && { agent: modelOptions.agent }),
+          // Tool allowlist / denylist (per-channel persona scope control)
+          ...(modelOptions?.allowedTools && modelOptions.allowedTools.length > 0 && { allowedTools: modelOptions.allowedTools }),
+          ...(modelOptions?.disallowedTools && modelOptions.disallowedTools.length > 0 && { disallowedTools: modelOptions.disallowedTools }),
           // Advanced features: betas, file checkpointing, sandbox, additional dirs, fork
           ...(modelOptions?.betas && modelOptions.betas.length > 0 && { betas: modelOptions.betas }),
           ...(modelOptions?.enableFileCheckpointing && { enableFileCheckpointing: true }),
