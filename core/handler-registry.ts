@@ -83,14 +83,21 @@ export interface ClaudeSessionState {
  * Claude session operations.
  */
 export interface ClaudeSessionOps {
-  /** Get current controller */
+  /** Get current controller (global "most recent" slot, legacy) */
   getController: () => AbortController | null;
-  /** Set controller */
+  /** Set controller (global "most recent" slot, legacy) */
   setController: (controller: AbortController | null) => void;
   /** Get session ID */
   getSessionId: () => string | undefined;
   /** Set session ID */
   setSessionId: (sessionId: string | undefined) => void;
+  /** Get the AbortController for a specific channel/thread, if any. */
+  getControllerForChannel: (channelId: string) => AbortController | null;
+  /** Set the AbortController for a specific channel/thread.
+   *  Passing null/undefined clears it. Also updates the global "most recent" slot. */
+  setControllerForChannel: (channelId: string, controller: AbortController | null) => void;
+  /** Abort every per-channel controller (used on shutdown). */
+  abortAllControllers: () => void;
 }
 
 /**
@@ -285,12 +292,36 @@ export function createClaudeSession(): ClaudeSessionOps {
     controller: null,
     sessionId: undefined,
   };
+  const channelControllers = new Map<string, AbortController>();
 
   return {
     getController: () => state.controller,
     setController: (controller) => { state.controller = controller; },
     getSessionId: () => state.sessionId,
     setSessionId: (sessionId) => { state.sessionId = sessionId; },
+    getControllerForChannel: (channelId) => channelControllers.get(channelId) ?? null,
+    setControllerForChannel: (channelId, controller) => {
+      if (controller) {
+        channelControllers.set(channelId, controller);
+        // Mirror into the global slot so legacy helpers (signal handlers,
+        // /claude-cancel fallbacks) still see *something* active.
+        state.controller = controller;
+      } else {
+        channelControllers.delete(channelId);
+        // Only clear the global slot if it matched the removed one.
+        // (Otherwise a concurrent channel's controller would be evicted.)
+      }
+    },
+    abortAllControllers: () => {
+      for (const c of channelControllers.values()) {
+        try { c.abort(); } catch { /* best-effort */ }
+      }
+      channelControllers.clear();
+      if (state.controller) {
+        try { state.controller.abort(); } catch { /* best-effort */ }
+        state.controller = null;
+      }
+    },
   };
 }
 
@@ -543,6 +574,8 @@ export function createAllHandlers(
     getWorkDirForChannel: deps.getWorkDirForChannel,
     getClaudeController: claudeSession.getController,
     setClaudeController: claudeSession.setController,
+    getChannelController: claudeSession.getControllerForChannel,
+    setChannelController: claudeSession.setControllerForChannel,
     getSessionForChannel: (channelId: string) => channelSessionMap.get(channelId),
     setSessionForChannel: (channelId: string, sessionId: string | undefined) => {
       if (sessionId) {

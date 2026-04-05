@@ -77,8 +77,15 @@ export interface ClaudeHandlerDeps {
   /** Per-channel working-directory resolver. Returns the channel's bound
    *  project directory, or undefined to fall back to the global workDir. */
   getWorkDirForChannel?: (channelId: string) => string | undefined;
+  /** Legacy global getter — retained for back-compat. */
   getClaudeController: () => AbortController | null;
+  /** Legacy global setter — retained for back-compat. */
   setClaudeController: (controller: AbortController | null) => void;
+  /** Per-channel AbortController getter. When provided, /claude in one
+   *  channel no longer aborts concurrent /claude calls in other channels. */
+  getChannelController?: (channelId: string) => AbortController | null;
+  /** Per-channel AbortController setter (null to clear). */
+  setChannelController?: (channelId: string, controller: AbortController | null) => void;
   /** Get session ID for a specific channel/thread (per-channel tracking) */
   getSessionForChannel: (channelId: string) => string | undefined;
   /** Set session ID for a specific channel/thread */
@@ -103,6 +110,36 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
     return deps.getWorkDirForChannel?.(channelId) ?? workDir;
   };
 
+  /**
+   * Acquire an AbortController scoped to a channel. If the channel already
+   * has an active controller, it is aborted first. When per-channel ops are
+   * not wired, falls back to the legacy global slot (original behavior).
+   */
+  const acquireController = (channelId: string): AbortController => {
+    if (deps.getChannelController && deps.setChannelController) {
+      const existing = deps.getChannelController(channelId);
+      if (existing) existing.abort();
+      const controller = new AbortController();
+      deps.setChannelController(channelId, controller);
+      return controller;
+    }
+    // Legacy path: global controller, aborts any prior /claude in any channel.
+    const existing = deps.getClaudeController();
+    if (existing) existing.abort();
+    const controller = new AbortController();
+    deps.setClaudeController(controller);
+    return controller;
+  };
+
+  /** Release the channel's controller slot. */
+  const releaseController = (channelId: string): void => {
+    if (deps.setChannelController) {
+      deps.setChannelController(channelId, null);
+      return;
+    }
+    deps.setClaudeController(null);
+  };
+
   return {
     /**
      * /claude — Send a message to Claude. Auto-continues the session active in the
@@ -110,13 +147,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
      */
     // deno-lint-ignore no-explicit-any
     async onClaude(ctx: any, prompt: string, channelId: string, explicitSessionId?: string): Promise<ClaudeResponse> {
-      const existingController = deps.getClaudeController();
-      if (existingController) {
-        existingController.abort();
-      }
-
-      const controller = new AbortController();
-      deps.setClaudeController(controller);
+      const controller = acquireController(channelId);
 
       await ctx.deferReply();
 
@@ -170,7 +201,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
         deps.setSessionForChannel(channelId, result.sessionId);
       }
       deps.setClaudeSessionId(result.sessionId);
-      deps.setClaudeController(null);
+      releaseController(channelId);
 
       return result;
     },
@@ -185,13 +216,9 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       const invokingChannelId: string = typeof ctx?.getChannelId === 'function'
         ? ctx.getChannelId()
         : '';
-      const existingController = deps.getClaudeController();
-      if (existingController) {
-        existingController.abort();
-      }
-
-      const controller = new AbortController();
-      deps.setClaudeController(controller);
+      // The thread's own channelId isn't known yet; key the controller to the
+      // invoking channel temporarily, transfer to the thread channel after creation.
+      const controller = acquireController(invokingChannelId);
 
       await ctx.deferReply();
 
@@ -240,7 +267,7 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       );
 
       deps.setClaudeSessionId(result.sessionId);
-      deps.setClaudeController(null);
+      releaseController(invokingChannelId);
 
       // Map the thread channel → session so /claude inside the thread auto-continues
       if (threadSessionKey && result.sessionId && deps.sessionThreads) {
@@ -328,17 +355,32 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
     },
 
     // deno-lint-ignore no-explicit-any
-    onClaudeCancel(_ctx: any): boolean {
+    onClaudeCancel(ctx: any): boolean {
+      // Try to cancel the invoking channel's /claude first — more intuitive
+      // than cancelling whatever happens to be the "most recent" globally.
+      const channelId: string = typeof ctx?.getChannelId === 'function'
+        ? ctx.getChannelId()
+        : '';
+      const channelController = channelId && deps.getChannelController
+        ? deps.getChannelController(channelId)
+        : null;
+
+      if (channelController) {
+        console.log(`Cancelling Claude Code session for channel ${channelId}`);
+        channelController.abort();
+        deps.setChannelController?.(channelId, null);
+        return true;
+      }
+
+      // Fall back to the legacy global slot.
       const currentController = deps.getClaudeController();
       if (!currentController) {
         return false;
       }
-
-      console.log("Cancelling Claude Code session...");
+      console.log("Cancelling Claude Code session (global fallback)...");
       currentController.abort();
       deps.setClaudeController(null);
       deps.setClaudeSessionId(undefined);
-
       return true;
     }
   };
