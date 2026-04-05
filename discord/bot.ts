@@ -603,6 +603,28 @@ export async function createDiscordBot(
     }
   });
 
+  // Forum thread → Claude session bridge.
+  // When a user creates a post in a managed forum channel, spawn a fresh
+  // Claude session for the thread via the onForumThreadCreated callback.
+  if (dependencies.onForumThreadCreated) {
+    client.on(Events.ThreadCreate, async (thread) => {
+      try {
+        // Only react to forum threads whose parent the bot manages.
+        const parentId: string | undefined = thread.parentId ?? undefined;
+        if (!parentId) return;
+        if (thread.parent?.type !== ChannelType.GuildForum) return;
+        const managedByEnv = dependencies.allowedChannelIds?.has(parentId) ?? false;
+        const managedByBind = dependencies.isChannelBound?.(parentId) ?? false;
+        if (!managedByEnv && !managedByBind) return;
+
+        await dependencies.onForumThreadCreated!(thread);
+      } catch (err) {
+        console.error('[ForumThread] handler failed:', err);
+      }
+    });
+    console.log('[ForumThread] listening for new posts in managed forum channels');
+  }
+
   // Channel monitoring -- auto-respond to messages from specific bots/webhooks
   if (dependencies.monitorConfig) {
     const { channelId, botIds, onAlertMessage } = dependencies.monitorConfig;

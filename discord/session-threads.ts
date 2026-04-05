@@ -104,6 +104,36 @@ export class SessionThreadManager {
     return thread;
   }
 
+  /**
+   * Register an existing ThreadChannel (e.g. a new forum post) as a
+   * Claude session. Unlike {@link createSessionThread}, the Discord
+   * thread already exists — we just track it.
+   *
+   * @param thread        The existing Discord thread.
+   * @param sessionId     Placeholder or real session ID.
+   * @param displayName   Optional custom name for bookkeeping.
+   */
+  registerExistingThread(
+    thread: ThreadChannel,
+    sessionId: string,
+    displayName?: string,
+  ): void {
+    const meta: SessionThread = {
+      sessionId,
+      threadId: thread.id,
+      threadName: displayName ?? thread.name,
+      createdAt: new Date(),
+      lastActivity: new Date(),
+      messageCount: 0,
+    };
+    this.threads.set(sessionId, meta);
+    this.threadChannels.set(sessionId, thread);
+    if (thread.parentId) {
+      this.parentChannels.set(sessionId, thread.parentId);
+    }
+    this.schedulePersist();
+  }
+
   // ───────────────────── Lookup ─────────────────────
 
   /**

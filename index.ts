@@ -330,6 +330,92 @@ export async function createClaudeCodeBot(config: BotConfig) {
     console.log(`[index] ALLOWED_CHANNEL_IDS: ${allowedChannelIds.size} channel(s) allowed`);
   }
 
+  // Forum thread handler — spawns a fresh Claude session for each new forum
+  // post in a managed forum channel. The thread inherits the parent forum's
+  // /bind'd workDir (or the global WORK_DIR if the parent has no binding).
+  const onForumThreadCreated = async (thread: {
+    id: string;
+    parentId: string | null;
+    name: string;
+    fetchStarterMessage: () => Promise<{ content: string } | null>;
+    send: (content: unknown) => Promise<unknown>;
+  }) => {
+    const parentId = thread.parentId;
+    if (!parentId) return;
+
+    // Resolve the thread's working directory: parent binding → global fallback
+    const parentBinding = channelBindings.get(parentId);
+    const threadWorkDir = parentBinding?.workDir ?? workDir;
+
+    // Auto-bind the thread's channel so follow-up /claude in the thread
+    // uses the correct workDir and shows up in /bindings for visibility.
+    await channelBindings.set(thread.id, {
+      workDir: threadWorkDir,
+      boundAt: new Date().toISOString(),
+      boundBy: "forum-auto",
+      label: `forum: ${thread.name}`,
+    });
+
+    // Register the thread in SessionThreadManager with a placeholder session ID.
+    const placeholderKey = `pending_forum_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // deno-lint-ignore no-explicit-any
+    sessionThreadManager.registerExistingThread(thread as any, placeholderKey, thread.name);
+
+    // Fetch the forum post body — wait briefly because Discord populates it async.
+    let starterContent = "";
+    try {
+      const starter = await thread.fetchStarterMessage();
+      starterContent = starter?.content?.trim() ?? "";
+    } catch {
+      // Forum posts without body, or fetch timing issue — treat as empty.
+    }
+
+    // Send a welcome embed so the user knows the bot is engaged.
+    // deno-lint-ignore no-explicit-any
+    await sendMessageContent(thread as any, {
+      embeds: [{
+        color: 0x5865f2,
+        title: "🧵 Forum session started",
+        description: [
+          `Working directory: \`${threadWorkDir}\``,
+          starterContent
+            ? "Processing your post as the first prompt…"
+            : "Waiting for your first `/claude` in this thread.",
+        ].join("\n"),
+        timestamp: true,
+      }],
+    });
+
+    // If there's a starter prompt, run it as the first query.
+    if (starterContent) {
+      const controller = new AbortController();
+      // deno-lint-ignore no-explicit-any
+      const threadSender = createClaudeSender(createChannelSenderAdapter(thread as any));
+      try {
+        const result = await sendToClaudeCode(
+          threadWorkDir,
+          starterContent,
+          controller,
+          undefined,
+          undefined,
+          (jsonData) => {
+            const msgs = convertToClaudeMessages(jsonData);
+            if (msgs.length > 0) threadSender(msgs).catch(() => {});
+          },
+          false,
+        );
+        if (result.sessionId) {
+          // Promote placeholder → real session ID in SessionThreadManager
+          sessionThreadManager.updateSessionId(placeholderKey, result.sessionId);
+          // Bind thread channel → session so follow-up /claude resumes
+          allHandlers.claude.setSessionForChannel(thread.id, result.sessionId);
+        }
+      } catch (err) {
+        console.error("[ForumThread] initial query failed:", err);
+      }
+    }
+  };
+
   // Create dependencies object for Discord bot
   const dependencies: BotDependencies = {
     commands: getAllCommands(),
@@ -337,6 +423,8 @@ export async function createClaudeCodeBot(config: BotConfig) {
     botSettings,
     allowedChannelIds,
     isChannelBound: (channelId) => channelBindings.has(channelId),
+    // deno-lint-ignore no-explicit-any
+    onForumThreadCreated: onForumThreadCreated as any,
     onContinueSession: async (ctx) => {
       await allHandlers.claude.onContinue(ctx);
     },

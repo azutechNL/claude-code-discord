@@ -1,5 +1,5 @@
 // Discord module types
-import type { TextChannel } from "npm:discord.js@14.14.1";
+import type { TextChannel, ThreadChannel } from "npm:discord.js@14.14.1";
 import type { BotSettings } from "../types/shared.ts";
 
 export interface EmbedData {
@@ -135,4 +135,9 @@ export interface BotDependencies {
   /** Dynamic callback: true if the channel ID has a /bind project binding.
    *  Bound channels are auto-allowed in addition to allowedChannelIds. */
   isChannelBound?: (channelId: string) => boolean;
+  /** Invoked when a new thread is created in a forum channel the bot
+   *  manages (via allowedChannelIds or /bind). Typically spawns a fresh
+   *  Claude session scoped to the forum's project binding, with the
+   *  forum post's body as the initial prompt. */
+  onForumThreadCreated?: (thread: ThreadChannel) => Promise<void>;
 }

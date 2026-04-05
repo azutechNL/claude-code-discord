@@ -382,6 +382,18 @@ export function createClaudeHandlers(deps: ClaudeHandlerDeps) {
       deps.setClaudeController(null);
       deps.setClaudeSessionId(undefined);
       return true;
-    }
+    },
+
+    // ────────── External hooks (for non-slash-command callers) ──────────
+
+    /** Get the session ID bound to a Discord channel/thread. */
+    getSessionForChannel(channelId: string): string | undefined {
+      return deps.getSessionForChannel(channelId);
+    },
+    /** Update the session ID for a Discord channel/thread (persists).
+     *  Used by forum-thread auto-sessions and other externally-spawned flows. */
+    setSessionForChannel(channelId: string, sessionId: string | undefined): void {
+      deps.setSessionForChannel(channelId, sessionId);
+    },
   };
 }
