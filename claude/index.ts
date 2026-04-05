@@ -4,6 +4,13 @@ export type { SessionThreadCallbacks } from "./command.ts";
 export { cleanSessionId, sendToClaudeCode } from "./client.ts";
 export type { ClaudeModelOptions, SDKPermissionMode, ThinkingConfig, EffortLevel, SDKAgentDefinition, SDKModelInfo } from "./client.ts";
 export { createClaudeSender, createQuietClaudeSender, expandableContent } from "./discord-sender.ts";
+export {
+  type DashboardEndpoints,
+  type DashboardHookContext,
+  buildDashboardHooks,
+  getDashboardEndpoints,
+  mergeHooks,
+} from "./dashboard-hooks.ts";
 export { convertToClaudeMessages } from "./message-converter.ts";
 export {
   enhancedClaudeCommands,

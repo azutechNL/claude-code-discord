@@ -36,7 +36,7 @@ import {
 import type { ClaudeModelOptions } from "./claude/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
-import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks } from "./claude/index.ts";
+import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks, buildDashboardHooks, getDashboardEndpoints, mergeHooks } from "./claude/index.ts";
 import { buildQuestionMessages, parseAskUserButtonId, parseAskUserConfirmId, type AskUserQuestionInput } from "./claude/index.ts";
 import { buildPermissionEmbed, parsePermissionButtonId, type PermissionRequestCallback } from "./claude/index.ts";
 import { claudeCommands, enhancedClaudeCommands } from "./claude/index.ts";
@@ -415,6 +415,14 @@ export async function createClaudeCodeBot(config: BotConfig) {
     const modelOptions: ClaudeModelOptions = persona
       ? mergePersonaIntoOptions({}, persona)
       : {};
+
+    // Attach dashboard-forwarding hooks (fires fire-and-forget HTTP POSTs
+    // to agent-monitor + agents-observe sidecars). No-op if disabled.
+    const dashHooks = buildDashboardHooks(getDashboardEndpoints(), {
+      channelId,
+      personaName: binding?.personaName,
+    });
+    modelOptions.hooks = mergeHooks(modelOptions.hooks, dashHooks);
 
     // Visual ack: ⏳ on user's message. Best-effort, never throws.
     const react = async (emoji: string) => {
