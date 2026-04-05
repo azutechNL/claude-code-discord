@@ -21,6 +21,7 @@ import type {
   AgentDefinition as SDKAgentDefinition,
   McpServerConfig,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKPermissionMode } from "../claude/client.ts";
 
 /**
  * The user-editable persona preset as stored in `personas/*.json`.
@@ -35,6 +36,10 @@ export interface PersonaConfig {
   appendSystemPrompt?: string;
   /** Model alias: opus | sonnet | haiku (or a pinned full model ID). */
   model?: string;
+  /** SDK permission mode. When the user trusts this persona fully, set
+   *  "bypassPermissions" (YOLO). Defaults come from the caller
+   *  (runPromptInChannel → bypassPermissions; /claude → user settings). */
+  permissionMode?: SDKPermissionMode;
   /** Whitelist of tool names (e.g. ["Read", "Write", "WebFetch"]). */
   allowedTools?: string[];
   /** Blacklist of tool names; takes precedence over allowedTools. */
@@ -157,10 +162,12 @@ export function mergePersonaIntoOptions<
     mcpServers?: Record<string, McpServerConfig>;
     agents?: Record<string, SDKAgentDefinition>;
     agent?: string;
+    permissionMode?: SDKPermissionMode;
   },
 >(target: T, persona: PersonaConfig | undefined): T {
   if (!persona) return target;
   if (persona.model && !target.model) target.model = persona.model;
+  if (persona.permissionMode && !target.permissionMode) target.permissionMode = persona.permissionMode;
   if (persona.appendSystemPrompt) {
     target.appendSystemPrompt = target.appendSystemPrompt
       ? `${target.appendSystemPrompt}\n\n${persona.appendSystemPrompt}`

@@ -426,6 +426,14 @@ export async function createClaudeCodeBot(config: BotConfig) {
       ? mergePersonaIntoOptions({}, persona)
       : {};
 
+    // Ambient / forum messages run under YOLO trust by default — the user
+    // explicitly chose full-access mode for this bot. dontAsk blocks MCP
+    // tools pre-emptively (Claude self-censors) which breaks openclaw and
+    // WebFetch-style delegation. Persona can override.
+    if (!modelOptions.permissionMode) {
+      modelOptions.permissionMode = "bypassPermissions";
+    }
+
     // Inject the in-process OpenClaw MCP server when the persona opts in.
     if (persona?.enableOpenclaw && openclawMcpServer) {
       modelOptions.mcpServers = {

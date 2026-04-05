@@ -299,6 +299,7 @@ export async function sendToClaudeCode(
             if (mcpToolPrefixes.some(prefix => toolName.startsWith(prefix))) {
               return { behavior: 'allow' as const, updatedInput: input };
             }
+            console.log(`[canUseTool] DENY ${toolName} (prefixes: ${JSON.stringify(mcpToolPrefixes)})`);
 
             // Interactive permission request — show Discord buttons for Allow/Deny
             if (modelOptions?.onPermissionRequest) {
