@@ -277,6 +277,7 @@ export async function sendToClaudeCode(
           // NOTE: The SDK's runtime Zod schema requires `updatedInput` on allow responses
           // even though the TypeScript types mark it optional — pass through original input.
           canUseTool: async (toolName: string, input: Record<string, unknown>) => {
+            console.log(`[canUseTool] called for ${toolName} (permMode=${permMode})`);
             // AskUserQuestion: route to Discord interactive flow
             if (toolName === 'AskUserQuestion' && modelOptions?.onAskUser) {
               try {

@@ -32,6 +32,7 @@ import {
   PersonaManager,
   createPersonaCommandHandlers,
   mergePersonaIntoOptions,
+  createSessionCommandHandlers,
 } from "./core/index.ts";
 import type { ClaudeModelOptions } from "./claude/index.ts";
 
@@ -326,6 +327,18 @@ export async function createClaudeCodeBot(config: BotConfig) {
     personaCommandHandlers: createPersonaCommandHandlers({
       personaManager,
       channelBindings,
+      globalWorkDir: workDir,
+      onPersonaChanged: (channelId) => {
+        // Clear any cached session so the next message starts fresh with
+        // the new persona's MCP tools and system prompt.
+        allHandlers.claude.setSessionForChannel(channelId, undefined);
+      },
+    }),
+    sessionCommandHandlers: createSessionCommandHandlers({
+      channelBindings,
+      personaManager,
+      getSessionForChannel: allHandlers.claude.getSessionForChannel,
+      setSessionForChannel: allHandlers.claude.setSessionForChannel,
       globalWorkDir: workDir,
     }),
   });

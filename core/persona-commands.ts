@@ -61,12 +61,16 @@ export interface PersonaHandlerDeps {
   channelBindings: ChannelBindingManager;
   /** Global fallback used when auto-creating a binding via /persona load. */
   globalWorkDir: string;
+  /** Optional session-clear hook. Called with channelId when persona load
+   *  or clear changes the persona — forces the next message to start a
+   *  fresh Claude session so new MCP tools / system-prompt are honored. */
+  onPersonaChanged?: (channelId: string) => void;
 }
 
 export function createPersonaCommandHandlers(
   deps: PersonaHandlerDeps,
 ): CommandHandlers {
-  const { personaManager, channelBindings, globalWorkDir } = deps;
+  const { personaManager, channelBindings, globalWorkDir, onPersonaChanged } = deps;
   const handlers: CommandHandlers = new Map();
 
   handlers.set("persona", {
@@ -94,6 +98,7 @@ export function createPersonaCommandHandlers(
         }
 
         const existing = channelBindings.get(channelId);
+        const personaChanged = existing?.personaName !== name;
         const nextBinding = existing
           ? { ...existing, personaName: name }
           : {
@@ -104,6 +109,7 @@ export function createPersonaCommandHandlers(
               personaName: name,
             };
         await channelBindings.set(channelId, nextBinding);
+        if (personaChanged) onPersonaChanged?.(channelId);
 
         const persona = personaManager.get(name)!;
         const { embed } = createFormattedEmbed(
@@ -113,6 +119,7 @@ export function createPersonaCommandHandlers(
             `**Description:** ${persona.description}`,
             `**Working directory:** \`${nextBinding.workDir}\``,
             persona.model ? `**Model:** ${persona.model}` : null,
+            personaChanged ? `_Session reset so new tools/prompt take effect._` : null,
           ].filter(Boolean).join("\n"),
           0x00ff00,
         );
@@ -135,9 +142,13 @@ export function createPersonaCommandHandlers(
         const next = { ...existing };
         delete next.personaName;
         await channelBindings.set(channelId, next);
+        onPersonaChanged?.(channelId);
         const { embed } = createFormattedEmbed(
           "✅ Persona detached",
-          `Removed persona \`${prev}\`. Channel reverts to bot defaults.`,
+          [
+            `Removed persona \`${prev}\`. Channel reverts to bot defaults.`,
+            `_Session reset._`,
+          ].join("\n"),
           0x00ff00,
         );
         await ctx.editReply({ embeds: [embed] });

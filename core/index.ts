@@ -144,3 +144,10 @@ export {
   personaCommands,
   createPersonaCommandHandlers,
 } from "./persona-commands.ts";
+
+// /session reset + /session info slash commands
+export {
+  type SessionHandlerDeps,
+  sessionCommands,
+  createSessionCommandHandlers,
+} from "./session-commands.ts";
