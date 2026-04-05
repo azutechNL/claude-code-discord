@@ -44,16 +44,43 @@ the bot's defaults (global `WORK_DIR`, default model, full tool set).
 | `model` | SDK `model` | `opus`, `sonnet`, `haiku`, or a full model ID. |
 | `allowedTools` / `disallowedTools` | SDK tool allow/deny lists | Denylist wins. |
 | `mcpServers` | SDK `mcpServers` | Merged with `<workDir>/.claude/mcp.json`. |
-| `agents` | SDK `agents` | Sub-agent definitions. |
-| `agent` | SDK `agent` | Main-thread agent name — must exist in `agents`. |
+| `agents` | SDK `agents` | Sub-agent definitions (see below). |
+| `agent` | SDK `agent` | Main-thread agent name — must exist in `agents`. Omit to let Claude act as the "lead" with the persona's `appendSystemPrompt`. |
+| `permissionMode` | SDK `permissionMode` | `bypassPermissions` (YOLO), `acceptEdits`, `plan`, `dontAsk`, `default`. Runtime falls back to `bypassPermissions` when omitted (the bot is YOLO by default). |
+| `enableOpenclaw` | — (bot-specific) | When true, the bot injects its in-process OpenClaw MCP server into this persona's `mcpServers` so the agent can delegate to OpenClaw via `openclaw_delegate`. |
 | `plugins` | SDK `plugins` | Claude Code local plugins. |
 | `skills` | SDK `skills` | Namespaced skill names. |
+
+## Subagents (`agents` field)
+
+Personas can declare specialized subagents the lead can delegate to.
+Each entry is a full `AgentDefinition`:
+
+```json
+"agents": {
+  "scraper": {
+    "description": "Shown to the lead; guides when to delegate.",
+    "tools": ["WebFetch"],                       // tool allowlist for this subagent
+    "disallowedTools": ["Bash"],                 // optional denylist
+    "prompt": "System prompt for the subagent.",
+    "model": "inherit"                           // or "sonnet"/"opus"/"haiku"
+  }
+}
+```
+
+The lead persona invokes a subagent when it decides the subagent's
+description matches the task. Delegation rules live in the lead's
+`appendSystemPrompt`. Subagents run in their own context window and
+return a single response back to the lead.
+
+Don't set `agent` unless you want a named agent to *be* the lead. When
+`agent` is omitted, Claude acts as the lead directly.
 
 ## Seed presets
 
 - **default** — Claude Code base, no overrides.
-- **docs-writer** — writing/editing focus, sonnet, Read+Write+Edit+Glob+Grep only.
-- **market-researcher** — research focus, sonnet, WebFetch+WebSearch. Hook point for OpenClaw MCP delegation.
+- **docs-writer** — sonnet, Read+Write+Edit+Glob+Grep. Subagents: `outliner`, `proofreader`.
+- **market-researcher** — sonnet, YOLO, OpenClaw delegation enabled. Subagents: `scraper`, `summariser`, `verifier`.
 - **bot-maintainer** — maintains this repo, opus, full tools, knows the architecture.
 - **code-reviewer** — read-only audit mode, sonnet, denies Write/Edit/Bash.
 
