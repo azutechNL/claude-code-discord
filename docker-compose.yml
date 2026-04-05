@@ -116,7 +116,9 @@ services:
       - AGENTS_OBSERVE_SERVER_PORT=4981
       - AGENTS_OBSERVE_DB_PATH=/data/observe.db
       - AGENTS_OBSERVE_CLIENT_DIST_PATH=/app/client/dist
-      - AGENTS_OBSERVE_RUNTIME=docker
+      # Runtime=local disables the idle auto-shutdown (docker mode shuts down
+      # after 60s if no WS clients / consumers are connected).
+      - AGENTS_OBSERVE_RUNTIME=local
       - AGENTS_OBSERVE_STORAGE_ADAPTER=sqlite
       - AGENTS_OBSERVE_LOG_LEVEL=info
     volumes:
