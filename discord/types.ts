@@ -140,4 +140,11 @@ export interface BotDependencies {
    *  Claude session scoped to the forum's project binding, with the
    *  forum post's body as the initial prompt. */
   onForumThreadCreated?: (thread: ThreadChannel) => Promise<void>;
+  /** Invoked when a plain (non-slash-command) message arrives in a managed
+   *  channel/thread. Enables "ambient messaging" — users can continue a
+   *  Claude session without prefixing every message with /claude.
+   *  The bot filters out its own messages, bot/webhook messages, and
+   *  messages from the bot's auto-created main channel before invoking. */
+  // deno-lint-ignore no-explicit-any
+  onChannelMessage?: (message: any) => Promise<void>;
 }

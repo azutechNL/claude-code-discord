@@ -330,6 +330,41 @@ export async function createClaudeCodeBot(config: BotConfig) {
     console.log(`[index] ALLOWED_CHANNEL_IDS: ${allowedChannelIds.size} channel(s) allowed`);
   }
 
+  // Shared helper: run a prompt against Claude scoped to a specific channel.
+  // Resolves the channel's bound workDir (falling back to global), resumes an
+  // existing session if one exists, otherwise starts a fresh one. Streams
+  // output back via a sender bound to the given Discord channel/thread.
+  // deno-lint-ignore no-explicit-any
+  const runPromptInChannel = async (channel: any, channelId: string, prompt: string): Promise<string | undefined> => {
+    const channelWorkDir = channelBindings.getWorkDir(channelId) ?? workDir;
+    const existingSessionId = allHandlers.claude.getSessionForChannel(channelId);
+    const sender = createClaudeSender(createChannelSenderAdapter(channel));
+    const controller = new AbortController();
+    try {
+      // Typing indicator for UX — best-effort, no-op if unsupported.
+      try { await channel.sendTyping?.(); } catch { /* ignore */ }
+      const result = await sendToClaudeCode(
+        channelWorkDir,
+        prompt,
+        controller,
+        existingSessionId,
+        undefined,
+        (jsonData) => {
+          const msgs = convertToClaudeMessages(jsonData);
+          if (msgs.length > 0) sender(msgs).catch(() => {});
+        },
+        false,
+      );
+      if (result.sessionId) {
+        allHandlers.claude.setSessionForChannel(channelId, result.sessionId);
+      }
+      return result.sessionId;
+    } catch (err) {
+      console.error(`[runPromptInChannel] query failed for channel ${channelId}:`, err);
+      return undefined;
+    }
+  };
+
   // Forum thread handler — spawns a fresh Claude session for each new forum
   // post in a managed forum channel. The thread inherits the parent forum's
   // /bind'd workDir (or the global WORK_DIR if the parent has no binding).
@@ -388,32 +423,23 @@ export async function createClaudeCodeBot(config: BotConfig) {
 
     // If there's a starter prompt, run it as the first query.
     if (starterContent) {
-      const controller = new AbortController();
-      // deno-lint-ignore no-explicit-any
-      const threadSender = createClaudeSender(createChannelSenderAdapter(thread as any));
-      try {
-        const result = await sendToClaudeCode(
-          threadWorkDir,
-          starterContent,
-          controller,
-          undefined,
-          undefined,
-          (jsonData) => {
-            const msgs = convertToClaudeMessages(jsonData);
-            if (msgs.length > 0) threadSender(msgs).catch(() => {});
-          },
-          false,
-        );
-        if (result.sessionId) {
-          // Promote placeholder → real session ID in SessionThreadManager
-          sessionThreadManager.updateSessionId(placeholderKey, result.sessionId);
-          // Bind thread channel → session so follow-up /claude resumes
-          allHandlers.claude.setSessionForChannel(thread.id, result.sessionId);
-        }
-      } catch (err) {
-        console.error("[ForumThread] initial query failed:", err);
+      const sessionId = await runPromptInChannel(thread, thread.id, starterContent);
+      if (sessionId) {
+        // Promote placeholder → real session ID in SessionThreadManager
+        sessionThreadManager.updateSessionId(placeholderKey, sessionId);
       }
     }
+  };
+
+  // Ambient-message handler — plain messages in managed channels continue or
+  // start a Claude session for that channel without any /claude prefix.
+  const onChannelMessage = async (message: {
+    channelId: string;
+    // deno-lint-ignore no-explicit-any
+    channel: any;
+    content: string;
+  }) => {
+    await runPromptInChannel(message.channel, message.channelId, message.content);
   };
 
   // Create dependencies object for Discord bot
@@ -425,6 +451,8 @@ export async function createClaudeCodeBot(config: BotConfig) {
     isChannelBound: (channelId) => channelBindings.has(channelId),
     // deno-lint-ignore no-explicit-any
     onForumThreadCreated: onForumThreadCreated as any,
+    // deno-lint-ignore no-explicit-any
+    onChannelMessage: onChannelMessage as any,
     onContinueSession: async (ctx) => {
       await allHandlers.claude.onContinue(ctx);
     },

@@ -609,20 +609,77 @@ export async function createDiscordBot(
   if (dependencies.onForumThreadCreated) {
     client.on(Events.ThreadCreate, async (thread) => {
       try {
-        // Only react to forum threads whose parent the bot manages.
         const parentId: string | undefined = thread.parentId ?? undefined;
-        if (!parentId) return;
-        if (thread.parent?.type !== ChannelType.GuildForum) return;
+        console.log(
+          `[ForumThread] ThreadCreate fired: id=${thread.id} name="${thread.name}" parentId=${parentId ?? 'null'} parentType=${thread.parent?.type ?? 'unknown'}`,
+        );
+        if (!parentId) {
+          console.log('[ForumThread] skipped: no parentId');
+          return;
+        }
+        if (thread.parent?.type !== ChannelType.GuildForum) {
+          console.log(`[ForumThread] skipped: parent type ${thread.parent?.type} != GuildForum (${ChannelType.GuildForum})`);
+          return;
+        }
         const managedByEnv = dependencies.allowedChannelIds?.has(parentId) ?? false;
         const managedByBind = dependencies.isChannelBound?.(parentId) ?? false;
-        if (!managedByEnv && !managedByBind) return;
+        if (!managedByEnv && !managedByBind) {
+          console.log(`[ForumThread] skipped: parent ${parentId} not in allowlist (env=${managedByEnv}, bind=${managedByBind})`);
+          return;
+        }
 
+        console.log(`[ForumThread] handling new post: ${thread.name}`);
         await dependencies.onForumThreadCreated!(thread);
       } catch (err) {
         console.error('[ForumThread] handler failed:', err);
       }
     });
     console.log('[ForumThread] listening for new posts in managed forum channels');
+  }
+
+  // Ambient messaging: plain messages in managed channels/threads trigger
+  // Claude without a /claude prefix. Only fires in channels with a /bind or
+  // in ALLOWED_CHANNEL_IDS (and threads thereof). The bot's auto-created
+  // myChannel root is explicitly excluded so it stays slash-command-only.
+  if (dependencies.onChannelMessage) {
+    client.on(Events.MessageCreate, async (message) => {
+      try {
+        // Skip bot's own messages and all other bot/webhook messages.
+        if (message.author.id === client.user?.id) return;
+        if (message.author.bot) return;
+
+        // Skip empty and slash-command-looking messages. Slash commands
+        // don't create Message events, but belt-and-braces.
+        const content = message.content?.trim();
+        if (!content) return;
+        if (content.startsWith('/')) return;
+
+        // Never trigger ambient in the bot's auto-created main channel —
+        // that's the control center for slash commands only. Thread replies
+        // inside myChannel (e.g. /claude-thread output) ARE allowed.
+        if (myChannel && message.channelId === myChannel.id) return;
+
+        // Must be a channel/thread the bot manages. For threads we treat
+        // the parent the same as the thread itself (both inherit binding).
+        const ch = message.channel;
+        // deno-lint-ignore no-explicit-any
+        const parentId: string | undefined = (ch as any)?.parentId ?? undefined;
+
+        const inAllowed =
+          dependencies.allowedChannelIds?.has(message.channelId) ||
+          (!!parentId && dependencies.allowedChannelIds?.has(parentId));
+        const inBound =
+          dependencies.isChannelBound?.(message.channelId) ||
+          (!!parentId && dependencies.isChannelBound?.(parentId));
+
+        if (!inAllowed && !inBound) return;
+
+        await dependencies.onChannelMessage!(message);
+      } catch (err) {
+        console.error('[AmbientMessage] handler failed:', err);
+      }
+    });
+    console.log('[AmbientMessage] listening for plain messages in managed channels');
   }
 
   // Channel monitoring -- auto-respond to messages from specific bots/webhooks
