@@ -505,18 +505,23 @@ export async function createDiscordBot(
     }
   }
 
-  // Register commands
+  // Register commands.
+  // Global commands propagate to guilds slowly (up to 1 hour). Guild-scoped
+  // commands appear instantly. We do both: guild-scoped in the ready handler
+  // below (instant for connected guilds), AND global here (eventual for any
+  // future guild the bot is added to).
   const rest = new REST({ version: '10' }).setToken(discordToken);
+  const commandBodies = commands.map((cmd) => cmd.toJSON());
 
   try {
-    console.log('Registering slash commands...');
+    console.log('Registering global slash commands (eventual propagation)...');
     await rest.put(
       Routes.applicationCommands(applicationId),
-      { body: commands.map(cmd => cmd.toJSON()) },
+      { body: commandBodies },
     );
-    console.log('Slash commands registered');
+    console.log('Global slash commands registered');
   } catch (error) {
-    console.error('Failed to register slash commands:', error);
+    console.error('Failed to register global slash commands:', error);
     throw error;
   }
 
@@ -526,6 +531,23 @@ export async function createDiscordBot(
     console.log(`Category: ${actualCategoryName}`);
     console.log(`Branch: ${branchName}`);
     console.log(`Working directory: ${workDir}`);
+
+    // Guild-scoped re-registration — propagates instantly so new commands
+    // show up without waiting for Discord's global command refresh.
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        await rest.put(
+          Routes.applicationGuildCommands(applicationId, guild.id),
+          { body: commandBodies },
+        );
+        console.log(`Guild slash commands registered for "${guild.name}" (${guild.id})`);
+      } catch (err) {
+        console.warn(
+          `Failed to register guild commands for ${guild.id}:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
 
     const guilds = client.guilds.cache;
     if (guilds.size === 0) {
