@@ -447,9 +447,12 @@ export async function sendToClaudeCode(
     };
   // deno-lint-ignore no-explicit-any
   } catch (error: any) {
-    // For exit code 1 errors (rate limit), retry with Haiku (cheaper/faster fallback)
+    // Exit code 1 from Claude Code CLI can mean many things: rate limit,
+    // stale session ID, auth failure, MCP init error, etc. Log the real
+    // error and retry with Haiku as a fallback (won't fix stale-session
+    // issues, but may help transient ones).
     if (error.message && (error.message.includes('exit code 1') || error.message.includes('exited with code 1'))) {
-      console.log("Rate limit detected, retrying with Haiku (fast fallback)...");
+      console.warn(`[sendToClaudeCode] CLI exit code 1 — retrying with Haiku. Original error: ${error.message.split('\n')[0]}`);
       
       try {
         const retryResult = await executeWithErrorHandling("haiku");
