@@ -54,6 +54,11 @@ services:
       # Host projects workspace — unbound channels see all projects here.
       # Channels can /bind <folder> to narrow scope to one project subdir.
       - /home/karim/projects:/workspaces/projects:rw
+      # Beads (bd) CLI — bind-mount host binaries + container-aware wrapper
+      # so each Claude session can manage per-project .beads/ databases.
+      - /home/karim/bin/dolt:/usr/local/bin/dolt:ro
+      - /home/karim/.local/bin/bd.bin:/usr/local/bin/bd.bin:ro
+      - ./scripts/bd-container.sh:/usr/local/bin/bd:ro
 
     # Resource limits (adjust based on your needs)
     deploy:
