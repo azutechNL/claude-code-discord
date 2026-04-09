@@ -12,7 +12,7 @@ const denoConfig = JSON.parse(Deno.readTextFileSync("deno.json"));
 /** Current bot version from deno.json */
 export const BOT_VERSION: string = denoConfig.version ?? "unknown";
 
-const REPO_OWNER = "zebbern";
+const REPO_OWNER = "azutechNL";
 const REPO_NAME = "claude-code-discord";
 
 export interface VersionCheckResult {
