@@ -133,6 +133,98 @@ services:
     networks:
       - claude-network
 
+  # ────────────────────────────────────────────────────────────────────
+  # Honcho — self-hosted user context + personality memory layer.
+  # API: http://honcho-api:8000 (internal), http://localhost:8000 (host)
+  # Deriver + Dreamer run as a background worker processing message queue.
+  # LLM: MiniMax M2.7 via OpenAI-compatible endpoint.
+  # ────────────────────────────────────────────────────────────────────
+
+  honcho-db:
+    image: pgvector/pgvector:pg15
+    container_name: honcho-db
+    restart: unless-stopped
+    command: ["postgres", "-c", "max_connections=200"]
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - /home/karim/honcho/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - honcho-pgdata:/var/lib/postgresql/data/
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - claude-network
+
+  honcho-redis:
+    image: redis:8.2
+    container_name: honcho-redis
+    restart: unless-stopped
+    volumes:
+      - honcho-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - claude-network
+
+  honcho-api:
+    build:
+      context: /home/karim/honcho
+      dockerfile: Dockerfile
+    container_name: honcho-api
+    entrypoint: ["sh", "docker/entrypoint.sh"]
+    restart: unless-stopped
+    depends_on:
+      honcho-db:
+        condition: service_healthy
+      honcho-redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@honcho-db:5432/postgres
+      - CACHE_URL=redis://honcho-redis:6379/0?suppress=true
+      - CACHE_ENABLED=true
+    env_file:
+      - /home/karim/honcho/.env
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - claude-network
+
+  honcho-deriver:
+    build:
+      context: /home/karim/honcho
+      dockerfile: Dockerfile
+    container_name: honcho-deriver
+    entrypoint: ["/app/.venv/bin/python", "-m", "src.deriver"]
+    restart: unless-stopped
+    depends_on:
+      honcho-db:
+        condition: service_healthy
+      honcho-redis:
+        condition: service_healthy
+    environment:
+      - DB_CONNECTION_URI=postgresql+psycopg://postgres:postgres@honcho-db:5432/postgres
+      - CACHE_URL=redis://honcho-redis:6379/0?suppress=true
+      - CACHE_ENABLED=true
+    env_file:
+      - /home/karim/honcho/.env
+    networks:
+      - claude-network
+
 # Named volumes for data persistence
 volumes:
   bot-data:
@@ -142,6 +234,10 @@ volumes:
   agent-monitor-data:
     driver: local
   agents-observe-data:
+    driver: local
+  honcho-pgdata:
+    driver: local
+  honcho-redis-data:
     driver: local
 
 # Network configuration
