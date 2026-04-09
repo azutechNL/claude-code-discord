@@ -530,6 +530,10 @@ export async function createClaudeCodeBot(config: BotConfig) {
     }
   };
 
+  // Track recently-created forum threads so the ambient MessageCreate handler
+  // doesn't also process the starter message (ThreadCreate already handles it).
+  const recentForumThreadIds = new Set<string>();
+
   // Forum thread handler — spawns a fresh Claude session for each new forum
   // post in a managed forum channel.
   //
@@ -549,6 +553,11 @@ export async function createClaudeCodeBot(config: BotConfig) {
   }) => {
     const parentId = thread.parentId;
     if (!parentId) return;
+
+    // Mark this thread as just-created so the ambient MessageCreate handler
+    // skips the starter message (we handle it here). Clear after 30s.
+    recentForumThreadIds.add(thread.id);
+    setTimeout(() => recentForumThreadIds.delete(thread.id), 30_000);
 
     const parentBinding = channelBindings.get(parentId);
 
@@ -631,6 +640,10 @@ export async function createClaudeCodeBot(config: BotConfig) {
     channel: any;
     content: string;
   }) => {
+    // Skip if this is the starter message of a just-created forum thread —
+    // onForumThreadCreated already handled it (or showed the wizard).
+    if (recentForumThreadIds.has(message.channelId)) return;
+
     await runPromptInChannel(
       message.channel,
       message.channelId,
