@@ -16,6 +16,13 @@ export {
   buildOpenclawMcpServer,
   getOpenclawBridgeConfig,
 } from "./openclaw-mcp.ts";
+export {
+  type HonchoClientConfig,
+  type HonchoContext,
+  HonchoClient,
+  getHonchoConfig,
+  buildHonchoClient,
+} from "./honcho-client.ts";
 export { convertToClaudeMessages } from "./message-converter.ts";
 export {
   enhancedClaudeCommands,
