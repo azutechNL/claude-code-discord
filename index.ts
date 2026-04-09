@@ -430,8 +430,9 @@ export async function createClaudeCodeBot(config: BotConfig) {
     // If channel has no binding (no workDir, no persona), show the
     // interactive setup wizard instead of running a query. The wizard
     // asks the user to pick a workspace + persona, then auto-configures.
-    // Forum threads skip this — they inherit from their parent forum.
-    if (!channelBindings.has(channelId) && !isForumContext(channel)) {
+    // Forum threads with unbound parents also get the wizard — forum
+    // channels have no text surface, so the wizard fires in the post.
+    if (!channelBindings.has(channelId)) {
       const userId = opts.triggerMessage?.author?.id ?? "unknown";
       const shown = await runSetupWizard(
         {
@@ -530,8 +531,15 @@ export async function createClaudeCodeBot(config: BotConfig) {
   };
 
   // Forum thread handler — spawns a fresh Claude session for each new forum
-  // post in a managed forum channel. The thread inherits the parent forum's
-  // /bind'd workDir (or the global WORK_DIR if the parent has no binding).
+  // post in a managed forum channel.
+  //
+  // If the parent forum IS bound → thread inherits workDir + persona, runs
+  // the post body as the first query immediately (clean, automatic).
+  //
+  // If the parent forum is NOT bound → thread is left unbound so
+  // runPromptInChannel's setup wizard fires in the thread. The user picks
+  // a workspace + persona from dropdowns, then resends their message.
+  // (Forum channels have no text surface, so the wizard must fire here.)
   const onForumThreadCreated = async (thread: {
     id: string;
     parentId: string | null;
@@ -542,50 +550,76 @@ export async function createClaudeCodeBot(config: BotConfig) {
     const parentId = thread.parentId;
     if (!parentId) return;
 
-    // Resolve the thread's working directory: parent binding → global fallback
     const parentBinding = channelBindings.get(parentId);
-    const threadWorkDir = parentBinding?.workDir ?? workDir;
 
-    // Auto-bind the thread's channel so follow-up /claude in the thread
-    // uses the correct workDir and shows up in /bindings for visibility.
-    await channelBindings.set(thread.id, {
-      workDir: threadWorkDir,
-      boundAt: new Date().toISOString(),
-      boundBy: "forum-auto",
-      label: `forum: ${thread.name}`,
-    });
-
-    // Register the thread in SessionThreadManager with a placeholder session ID.
+    // Register the thread in SessionThreadManager (for both paths).
     const placeholderKey = `pending_forum_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     // deno-lint-ignore no-explicit-any
     sessionThreadManager.registerExistingThread(thread as any, placeholderKey, thread.name);
 
-    // Fetch the forum post body — wait briefly because Discord populates it async.
-    let starterContent = "";
-    // deno-lint-ignore no-explicit-any
-    let starterMessage: any = null;
-    try {
-      starterMessage = await thread.fetchStarterMessage();
-      starterContent = starterMessage?.content?.trim() ?? "";
-    } catch {
-      // Forum posts without body, or fetch timing issue — treat as empty.
-    }
-
-    // If there's a starter prompt, run it as the first query in quiet mode.
-    // No welcome embed — the user will see ⏳ on their post, the response,
-    // and the footer. Clean chat-native UX.
-    if (starterContent) {
-      const sessionId = await runPromptInChannel(thread, thread.id, starterContent, {
-        triggerMessage: starterMessage,
+    if (parentBinding) {
+      // ── Parent is bound → inherit and auto-run ──
+      await channelBindings.set(thread.id, {
+        ...parentBinding,
+        boundAt: new Date().toISOString(),
+        boundBy: "forum-auto",
+        label: `forum: ${thread.name}`,
       });
-      if (sessionId) {
-        // Promote placeholder → real session ID in SessionThreadManager
-        sessionThreadManager.updateSessionId(placeholderKey, sessionId);
+
+      let starterContent = "";
+      // deno-lint-ignore no-explicit-any
+      let starterMessage: any = null;
+      try {
+        starterMessage = await thread.fetchStarterMessage();
+        starterContent = starterMessage?.content?.trim() ?? "";
+      } catch { /* ignore */ }
+
+      if (starterContent) {
+        const sessionId = await runPromptInChannel(thread, thread.id, starterContent, {
+          triggerMessage: starterMessage,
+        });
+        if (sessionId) {
+          sessionThreadManager.updateSessionId(placeholderKey, sessionId);
+        }
+      } else {
+        // deno-lint-ignore no-explicit-any
+        try { await (thread as any).send?.({ content: `-# 🧵 session ready · workDir \`${parentBinding.workDir}\`` }); } catch { /* ignore */ }
       }
     } else {
-      // Empty forum post — send a single subtext line indicating we're ready.
+      // ── Parent is NOT bound → let the wizard handle it ──
+      // Fetch the starter message so we can extract the author for the wizard.
       // deno-lint-ignore no-explicit-any
-      try { await (thread as any).send?.({ content: `-# 🧵 session ready · workDir \`${threadWorkDir}\`` }); } catch { /* ignore */ }
+      let starterMessage: any = null;
+      try {
+        starterMessage = await thread.fetchStarterMessage();
+      } catch { /* ignore */ }
+
+      const authorId = starterMessage?.author?.id ?? "unknown";
+      const starterContent = starterMessage?.content?.trim() ?? "";
+
+      // Show the setup wizard in the thread.
+      const wizardShown = await runSetupWizard(
+        {
+          channelBindings,
+          personaManager,
+          workspacesRoot: "/workspaces/projects",
+          globalWorkDir: workDir,
+          onSetupComplete: (cid) => {
+            allHandlers.claude.setSessionForChannel(cid, undefined);
+          },
+        },
+        // deno-lint-ignore no-explicit-any
+        thread as any,
+        thread.id,
+        authorId,
+      );
+
+      if (wizardShown && starterContent) {
+        // After wizard, the thread IS bound. Notify user to resend.
+        // (We can't auto-replay because the wizard is async + interactive.)
+        // deno-lint-ignore no-explicit-any
+        try { await (thread as any).send?.({ content: `-# Setup complete. Resend your message to start the session.` }); } catch { /* ignore */ }
+      }
     }
   };
 
