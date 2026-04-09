@@ -323,6 +323,9 @@ export async function createClaudeCodeBot(config: BotConfig) {
     bindCommandHandlers: createBindCommandHandlers({
       channelBindings,
       globalWorkDir: workDir,
+      onWorkDirChanged: (channelId) => {
+        allHandlers.claude.setSessionForChannel(channelId, undefined);
+      },
     }),
     personaCommandHandlers: createPersonaCommandHandlers({
       personaManager,

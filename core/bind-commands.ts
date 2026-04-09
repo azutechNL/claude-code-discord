@@ -55,6 +55,10 @@ export interface BindHandlerDeps {
   channelBindings: ChannelBindingManager;
   /** Global fallback WORK_DIR shown in /bindings for unbound channels. */
   globalWorkDir: string;
+  /** Called when a /bind changes the workDir or /unbind removes it.
+   *  Clears the channel's session so the next query starts fresh with
+   *  the correct CWD (Claude stores transcripts per-CWD hash). */
+  onWorkDirChanged?: (channelId: string) => void;
 }
 
 /**
@@ -63,7 +67,7 @@ export interface BindHandlerDeps {
 export function createBindCommandHandlers(
   deps: BindHandlerDeps,
 ): CommandHandlers {
-  const { channelBindings, globalWorkDir } = deps;
+  const { channelBindings, globalWorkDir, onWorkDirChanged } = deps;
   const handlers: CommandHandlers = new Map();
 
   handlers.set("bind", {
@@ -86,18 +90,24 @@ export function createBindCommandHandlers(
         return;
       }
 
+      const existing = channelBindings.get(channelId);
+      const workDirChanged = existing?.workDir !== validation.resolvedPath;
+
       await channelBindings.set(channelId, {
+        ...(existing ?? {}),
         workDir: validation.resolvedPath!,
         boundAt: new Date().toISOString(),
         boundBy: userId,
         label,
       });
+      if (workDirChanged) onWorkDirChanged?.(channelId);
 
       const { embed } = createFormattedEmbed(
         "✅ Channel bound",
         [
           `**Working directory:** \`${validation.resolvedPath}\``,
           label ? `**Label:** ${label}` : null,
+          workDirChanged ? `_Session reset — CWD changed._` : null,
           "",
           "`/claude` in this channel will now operate on this directory.",
         ]
@@ -115,6 +125,7 @@ export function createBindCommandHandlers(
       const channelId = ctx.getChannelId();
       const existing = channelBindings.get(channelId);
       const removed = await channelBindings.delete(channelId);
+      if (removed) onWorkDirChanged?.(channelId);
 
       if (!removed) {
         const { embed } = createFormattedEmbed(
