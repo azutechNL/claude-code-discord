@@ -149,4 +149,8 @@ export interface BotDependencies {
    *  messages from the bot's auto-created main channel before invoking. */
   // deno-lint-ignore no-explicit-any
   onChannelMessage?: (message: any) => Promise<void>;
+  /** Invoked when a thread is deleted or archived. Cleans up the channel's
+   *  session, binding, and thread-manager state so stale entries don't
+   *  accumulate. */
+  onThreadRemoved?: (threadId: string, reason: 'deleted' | 'archived') => Promise<void>;
 }

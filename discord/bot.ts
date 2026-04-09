@@ -706,6 +706,31 @@ export async function createDiscordBot(
     console.log('[AmbientMessage] listening for plain messages in managed channels');
   }
 
+  // Thread cleanup — remove sessions + bindings when threads are deleted or archived.
+  if (dependencies.onThreadRemoved) {
+    client.on(Events.ThreadDelete, async (thread) => {
+      try {
+        console.log(`[ThreadCleanup] deleted: ${thread.id} "${thread.name}"`);
+        await dependencies.onThreadRemoved!(thread.id, 'deleted');
+      } catch (err) {
+        console.error('[ThreadCleanup] delete handler failed:', err);
+      }
+    });
+
+    client.on(Events.ThreadUpdate, async (oldThread, newThread) => {
+      try {
+        // Detect archive transition (was active → now archived)
+        if (!oldThread.archived && newThread.archived) {
+          console.log(`[ThreadCleanup] archived: ${newThread.id} "${newThread.name}"`);
+          await dependencies.onThreadRemoved!(newThread.id, 'archived');
+        }
+      } catch (err) {
+        console.error('[ThreadCleanup] archive handler failed:', err);
+      }
+    });
+    console.log('[ThreadCleanup] listening for thread delete + archive events');
+  }
+
   // Channel monitoring -- auto-respond to messages from specific bots/webhooks
   if (dependencies.monitorConfig) {
     const { channelId, botIds, onAlertMessage } = dependencies.monitorConfig;

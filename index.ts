@@ -663,6 +663,15 @@ export async function createClaudeCodeBot(config: BotConfig) {
     onForumThreadCreated: onForumThreadCreated as any,
     // deno-lint-ignore no-explicit-any
     onChannelMessage: onChannelMessage as any,
+    onThreadRemoved: async (threadId, reason) => {
+      console.log(`[index] thread ${reason}: ${threadId} — cleaning up session + binding`);
+      // Clear session so no stale resume attempts
+      allHandlers.claude.setSessionForChannel(threadId, undefined);
+      // Remove binding (workDir + persona) for the thread
+      await channelBindings.delete(threadId);
+      // Remove from SessionThreadManager (metadata + channel ref)
+      sessionThreadManager.removeByThreadId(threadId);
+    },
     onContinueSession: async (ctx) => {
       await allHandlers.claude.onContinue(ctx);
     },

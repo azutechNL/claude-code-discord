@@ -228,6 +228,20 @@ export class SessionThreadManager {
     }
   }
 
+  /**
+   * Remove a specific session identified by its Discord thread ID.
+   * Returns true if a session was found and removed.
+   */
+  removeByThreadId(threadId: string): boolean {
+    const sessionId = this.findSessionByThreadId(threadId);
+    if (!sessionId) return false;
+    this.threads.delete(sessionId);
+    this.threadChannels.delete(sessionId);
+    this.parentChannels.delete(sessionId);
+    this.schedulePersist();
+    return true;
+  }
+
   // ───────────────────── Cleanup ─────────────────────
 
   /**
