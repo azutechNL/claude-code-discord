@@ -38,7 +38,7 @@ import {
 import type { ClaudeModelOptions } from "./claude/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
-import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks, buildDashboardHooks, getDashboardEndpoints, mergeHooks, buildOpenclawMcpServer } from "./claude/index.ts";
+import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks, buildDashboardHooks, getDashboardEndpoints, mergeHooks, buildOpenclawMcpServer, buildHonchoClient } from "./claude/index.ts";
 import { buildQuestionMessages, parseAskUserButtonId, parseAskUserConfirmId, type AskUserQuestionInput } from "./claude/index.ts";
 import { buildPermissionEmbed, parsePermissionButtonId, type PermissionRequestCallback } from "./claude/index.ts";
 import { claudeCommands, enhancedClaudeCommands } from "./claude/index.ts";
@@ -147,6 +147,18 @@ export async function createClaudeCodeBot(config: BotConfig) {
     console.log("[openclaw] in-process MCP server ready (enable via persona.enableOpenclaw)");
   } else {
     console.log("[openclaw] bridge not configured — OPENCLAW_BRIDGE_URL/TOKEN missing");
+  }
+
+  // Honcho user-context client — built once, used by personas with
+  // enableHoncho: true for pre-query context injection + post-query
+  // conversation storage. No-op when HONCHO_API_URL is unset.
+  const honchoClient = buildHonchoClient();
+  if (honchoClient) {
+    // Ensure workspace exists at startup
+    await honchoClient.ensureWorkspace();
+    console.log("[honcho] client ready (enable via persona.enableHoncho)");
+  } else {
+    console.log("[honcho] not configured — HONCHO_API_URL missing");
   }
 
   // Initialize dynamic model fetching (uses ANTHROPIC_API_KEY if available)
@@ -483,6 +495,29 @@ export async function createClaudeCodeBot(config: BotConfig) {
       };
     }
 
+    // ── Honcho pre-query: inject user context into system prompt ──
+    const honchoUserId = opts.triggerMessage?.author?.id ?? "unknown";
+    if (persona?.enableHoncho && honchoClient && honchoUserId !== "unknown") {
+      try {
+        await honchoClient.getOrCreatePeer(honchoUserId);
+        await honchoClient.getOrCreateSession(channelId);
+        const ctx = await honchoClient.getContext(channelId);
+        // Build a compact context block from summary + peer representation
+        const parts: string[] = [];
+        if (ctx.peer_representation) parts.push(`User profile: ${ctx.peer_representation}`);
+        if (ctx.peer_card) parts.push(`User card: ${ctx.peer_card}`);
+        if (ctx.summary) parts.push(`Session summary: ${ctx.summary}`);
+        if (parts.length > 0) {
+          const contextBlock = `\n\n<honcho_user_context>\n${parts.join("\n\n")}\n</honcho_user_context>`;
+          modelOptions.appendSystemPrompt = modelOptions.appendSystemPrompt
+            ? `${modelOptions.appendSystemPrompt}${contextBlock}`
+            : contextBlock;
+        }
+      } catch (err) {
+        console.warn("[honcho] pre-query context failed:", err instanceof Error ? err.message : err);
+      }
+    }
+
     // Attach dashboard-forwarding hooks (fires fire-and-forget HTTP POSTs
     // to agent-monitor + agents-observe sidecars). No-op if disabled.
     const dashHooks = buildDashboardHooks(getDashboardEndpoints(), {
@@ -515,6 +550,23 @@ export async function createClaudeCodeBot(config: BotConfig) {
       if (result.sessionId) {
         allHandlers.claude.setSessionForChannel(channelId, result.sessionId);
       }
+
+      // ── Honcho post-query: store conversation turn (fire-and-forget) ──
+      if (persona?.enableHoncho && honchoClient && result.response && honchoUserId !== "unknown") {
+        const botPeerId = "claude-bot";
+        void (async () => {
+          try {
+            await honchoClient.getOrCreatePeer(botPeerId, "Claude Bot");
+            await honchoClient.addMessages(channelId, [
+              { content: prompt, peer_id: honchoUserId },
+              { content: result.response.slice(0, 25000), peer_id: botPeerId },
+            ]);
+          } catch (err) {
+            console.warn("[honcho] post-query store failed:", err instanceof Error ? err.message : err);
+          }
+        })();
+      }
+
       if (quiet) {
         const footer = buildFooter(result);
         if (footer) {

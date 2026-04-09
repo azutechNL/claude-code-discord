@@ -45,6 +45,8 @@ services:
       - MONITOR_BOT_IDS=${MONITOR_BOT_IDS:-}
       - OPENCLAW_BRIDGE_URL=${OPENCLAW_BRIDGE_URL:-http://host.docker.internal:8901}
       - OPENCLAW_BRIDGE_TOKEN=${OPENCLAW_BRIDGE_TOKEN:-}
+      - HONCHO_API_URL=${HONCHO_API_URL:-http://honcho-api:8000}
+      - HONCHO_WORKSPACE_ID=${HONCHO_WORKSPACE_ID:-discord-bot}
 
     # Volume mounts for persistence and workspace access
     volumes:

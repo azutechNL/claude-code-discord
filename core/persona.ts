@@ -58,6 +58,10 @@ export interface PersonaConfig {
    *  this persona's mcpServers map so Claude can delegate tasks to
    *  local OpenClaw agents. Requires OPENCLAW_BRIDGE_URL + _TOKEN env. */
   enableOpenclaw?: boolean;
+  /** If true, the bot fetches user context from Honcho before each query
+   *  (injected into system prompt) and stores conversation turns after
+   *  each response. Requires HONCHO_API_URL env. */
+  enableHoncho?: boolean;
 }
 
 /**

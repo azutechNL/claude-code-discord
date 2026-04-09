@@ -3,6 +3,7 @@
   "model": "sonnet",
   "permissionMode": "bypassPermissions",
   "enableOpenclaw": true,
+  "enableHoncho": true,
   "agents": {
     "scraper": {
       "description": "Fetches a specific URL and extracts structured data. Returns raw facts only, no analysis.",
