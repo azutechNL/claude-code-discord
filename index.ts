@@ -515,7 +515,10 @@ export async function createClaudeCodeBot(config: BotConfig) {
     if (persona?.enableHoncho && honchoClient && honchoUserId !== "unknown") {
       try {
         await honchoClient.getOrCreatePeer(honchoUserId);
-        await honchoClient.getOrCreateSession(channelId);
+        await honchoClient.getOrCreateSession(channelId, {
+          [honchoUserId]: { observe_me: true, observe_others: false },
+          "claude-bot": { observe_me: false, observe_others: true },
+        });
         const ctx = await honchoClient.getContext(channelId);
         // Build a compact context block from summary + peer representation
         const parts: string[] = [];

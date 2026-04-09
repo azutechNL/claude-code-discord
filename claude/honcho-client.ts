@@ -101,10 +101,19 @@ export class HonchoClient {
 
   // ────────── Sessions ──────────
 
-  /** Get or create a session (idempotent). */
-  async getOrCreateSession(sessionId: string): Promise<void> {
+  /**
+   * Get or create a session with peer observation settings (idempotent).
+   * @param peers Map of peerId → { observe_me, observe_others }
+   */
+  async getOrCreateSession(
+    sessionId: string,
+    peers?: Record<string, { observe_me?: boolean; observe_others?: boolean }>,
+  ): Promise<void> {
     try {
-      await this.post("/sessions", { id: sessionId });
+      await this.post("/sessions", {
+        id: sessionId,
+        ...(peers ? { peers } : {}),
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";
       if (!msg.includes("409") && !msg.includes("422") && !msg.includes("already")) {
