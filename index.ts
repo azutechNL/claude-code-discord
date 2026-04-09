@@ -665,12 +665,43 @@ export async function createClaudeCodeBot(config: BotConfig) {
     onChannelMessage: onChannelMessage as any,
     onThreadRemoved: async (threadId, reason) => {
       console.log(`[index] thread ${reason}: ${threadId} — cleaning up session + binding`);
-      // Clear session so no stale resume attempts
+
+      // Capture details before cleanup for the notification.
+      const binding = channelBindings.get(threadId);
+      const sessionId = allHandlers.claude.getSessionForChannel(threadId);
+      const threadMeta = sessionThreadManager.getSessionThread(
+        sessionThreadManager.findSessionByThreadId(threadId) ?? "",
+      );
+
+      // Clean up session, binding, and thread-manager state.
       allHandlers.claude.setSessionForChannel(threadId, undefined);
-      // Remove binding (workDir + persona) for the thread
       await channelBindings.delete(threadId);
-      // Remove from SessionThreadManager (metadata + channel ref)
       sessionThreadManager.removeByThreadId(threadId);
+
+      // Notify the main channel (same style as startup/shutdown embeds).
+      try {
+        const mainChannel = bot?.getChannel();
+        if (mainChannel) {
+          await sendMessageContent(mainChannel, {
+            embeds: [{
+              color: reason === 'deleted' ? 0xff0000 : 0xffa500,
+              title: reason === 'deleted'
+                ? '🗑️ Thread deleted — session cleaned up'
+                : '📦 Thread archived — session cleaned up',
+              fields: [
+                { name: 'Thread', value: threadMeta?.threadName ?? threadId, inline: true },
+                { name: 'Reason', value: reason, inline: true },
+                ...(binding?.workDir ? [{ name: 'Workspace', value: `\`${binding.workDir}\``, inline: true }] : []),
+                ...(binding?.personaName ? [{ name: 'Persona', value: binding.personaName, inline: true }] : []),
+                ...(sessionId ? [{ name: 'Session', value: `\`${sessionId.slice(0, 8)}…\``, inline: true }] : []),
+              ],
+              timestamp: true,
+            }],
+          });
+        }
+      } catch (err) {
+        console.error('[index] failed to send thread-removal notification:', err);
+      }
     },
     onContinueSession: async (ctx) => {
       await allHandlers.claude.onContinue(ctx);
