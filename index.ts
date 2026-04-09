@@ -38,7 +38,7 @@ import {
 import type { ClaudeModelOptions } from "./claude/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
-import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks, buildDashboardHooks, getDashboardEndpoints, mergeHooks, buildOpenclawMcpServer, buildHonchoClient } from "./claude/index.ts";
+import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks, buildDashboardHooks, getDashboardEndpoints, mergeHooks, buildOpenclawMcpServer, buildHonchoClient, buildHonchoMcpServer, type HonchoMcpContext } from "./claude/index.ts";
 import { buildQuestionMessages, parseAskUserButtonId, parseAskUserConfirmId, type AskUserQuestionInput } from "./claude/index.ts";
 import { buildPermissionEmbed, parsePermissionButtonId, type PermissionRequestCallback } from "./claude/index.ts";
 import { claudeCommands, enhancedClaudeCommands } from "./claude/index.ts";
@@ -160,6 +160,14 @@ export async function createClaudeCodeBot(config: BotConfig) {
   } else {
     console.log("[honcho] not configured — HONCHO_API_URL missing");
   }
+
+  // Honcho MCP tools — in-process SDK server for active user-context
+  // queries (honcho_context, honcho_search, honcho_ask, honcho_remember).
+  // Mutable context object is set per-query in runPromptInChannel.
+  let honchoMcpContext: HonchoMcpContext = { userId: "unknown", channelId: "unknown" };
+  const honchoMcpServer = honchoClient
+    ? buildHonchoMcpServer(honchoClient, () => honchoMcpContext)
+    : undefined;
 
   // Initialize dynamic model fetching (uses ANTHROPIC_API_KEY if available)
   initModels();
@@ -495,8 +503,15 @@ export async function createClaudeCodeBot(config: BotConfig) {
       };
     }
 
-    // ── Honcho pre-query: inject user context into system prompt ──
+    // ── Honcho: set MCP context + inject pre-query user context ──
     const honchoUserId = opts.triggerMessage?.author?.id ?? "unknown";
+    if (persona?.enableHoncho && honchoMcpServer && honchoUserId !== "unknown") {
+      honchoMcpContext = { userId: honchoUserId, channelId };
+      modelOptions.mcpServers = {
+        ...(modelOptions.mcpServers ?? {}),
+        honcho: honchoMcpServer,
+      };
+    }
     if (persona?.enableHoncho && honchoClient && honchoUserId !== "unknown") {
       try {
         await honchoClient.getOrCreatePeer(honchoUserId);

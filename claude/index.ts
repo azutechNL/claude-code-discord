@@ -23,6 +23,10 @@ export {
   getHonchoConfig,
   buildHonchoClient,
 } from "./honcho-client.ts";
+export {
+  type HonchoMcpContext,
+  buildHonchoMcpServer,
+} from "./honcho-mcp.ts";
 export { convertToClaudeMessages } from "./message-converter.ts";
 export {
   enhancedClaudeCommands,
