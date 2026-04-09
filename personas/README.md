@@ -48,6 +48,7 @@ the bot's defaults (global `WORK_DIR`, default model, full tool set).
 | `agent` | SDK `agent` | Main-thread agent name — must exist in `agents`. Omit to let Claude act as the "lead" with the persona's `appendSystemPrompt`. |
 | `permissionMode` | SDK `permissionMode` | `bypassPermissions` (YOLO), `acceptEdits`, `plan`, `dontAsk`, `default`. Runtime falls back to `bypassPermissions` when omitted (the bot is YOLO by default). |
 | `enableOpenclaw` | — (bot-specific) | When true, the bot injects its in-process OpenClaw MCP server into this persona's `mcpServers` so the agent can delegate to OpenClaw via `openclaw_delegate`. |
+| `enableHoncho` | — (bot-specific) | When true, the bot (1) fetches user context from Honcho before each query and injects it into the system prompt, (2) stores conversation turns after each response, and (3) exposes `honcho_context`, `honcho_search`, `honcho_ask`, `honcho_remember` MCP tools. Requires `HONCHO_API_URL` env. |
 | `plugins` | SDK `plugins` | Claude Code local plugins. |
 | `skills` | SDK `skills` | Namespaced skill names. |
 
@@ -81,8 +82,9 @@ Don't set `agent` unless you want a named agent to *be* the lead. When
 - **default** — Claude Code base, no overrides.
 - **docs-writer** — sonnet, Read+Write+Edit+Glob+Grep. Subagents: `outliner`, `proofreader`.
 - **market-researcher** — sonnet, YOLO, OpenClaw delegation enabled. Subagents: `scraper`, `summariser`, `verifier`.
-- **bot-maintainer** — maintains this repo, opus, full tools, knows the architecture.
+- **bot-maintainer** — maintains this repo, opus, full tools, knows the architecture. Honcho enabled.
 - **code-reviewer** — read-only audit mode, sonnet, denies Write/Edit/Bash.
+- **memory-enhanced** — sonnet, YOLO, Honcho + OpenClaw. Best for daily work sessions.
 
 ## Adding a persona
 

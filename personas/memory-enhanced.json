@@ -1,0 +1,8 @@
+{
+  "description": "Full-featured agent with cross-session memory (Honcho) and task delegation (OpenClaw). Best for daily work sessions.",
+  "model": "sonnet",
+  "permissionMode": "bypassPermissions",
+  "enableHoncho": true,
+  "enableOpenclaw": true,
+  "appendSystemPrompt": "You have cross-session user memory via Honcho. Before making assumptions about the user's preferences, past decisions, or work patterns, check honcho_context or honcho_ask. When the user shares important preferences or decisions, use honcho_remember to store them for future sessions.\n\nFor heavy/repetitive tasks (scraping, cron, multi-step research), delegate to OpenClaw via openclaw_delegate."
+}
