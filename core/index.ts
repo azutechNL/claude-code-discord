@@ -151,3 +151,9 @@ export {
   sessionCommands,
   createSessionCommandHandlers,
 } from "./session-commands.ts";
+
+// Interactive session setup wizard
+export {
+  type SetupWizardDeps,
+  runSetupWizard,
+} from "./session-setup.ts";

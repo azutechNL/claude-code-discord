@@ -33,6 +33,7 @@ import {
   createPersonaCommandHandlers,
   mergePersonaIntoOptions,
   createSessionCommandHandlers,
+  runSetupWizard,
 } from "./core/index.ts";
 import type { ClaudeModelOptions } from "./claude/index.ts";
 
@@ -426,6 +427,29 @@ export async function createClaudeCodeBot(config: BotConfig) {
       triggerMessage?: any;
     } = {},
   ): Promise<string | undefined> => {
+    // If channel has no binding (no workDir, no persona), show the
+    // interactive setup wizard instead of running a query. The wizard
+    // asks the user to pick a workspace + persona, then auto-configures.
+    // Forum threads skip this — they inherit from their parent forum.
+    if (!channelBindings.has(channelId) && !isForumContext(channel)) {
+      const userId = opts.triggerMessage?.author?.id ?? "unknown";
+      const shown = await runSetupWizard(
+        {
+          channelBindings,
+          personaManager,
+          workspacesRoot: "/workspaces/projects",
+          globalWorkDir: workDir,
+          onSetupComplete: (cid) => {
+            allHandlers.claude.setSessionForChannel(cid, undefined);
+          },
+        },
+        channel,
+        channelId,
+        userId,
+      );
+      if (shown) return undefined; // wizard consumed the message
+    }
+
     const quiet = opts.quiet ?? isForumContext(channel);
     const binding = channelBindings.get(channelId);
     const channelWorkDir = binding?.workDir ?? workDir;
