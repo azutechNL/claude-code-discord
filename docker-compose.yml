@@ -61,6 +61,8 @@ services:
       - /home/karim/bin/dolt:/usr/local/bin/dolt:ro
       - /home/karim/.local/bin/bd.bin:/usr/local/bin/bd.bin:ro
       - ./scripts/bd-container.sh:/usr/local/bin/bd:ro
+      # Git credentials for git.theoffice210.nl (GitLab PAT via HTTPS)
+      - /home/karim/.git-credentials-container/.git-credentials:/home/claude/.git-credentials:ro
 
     # Resource limits (adjust based on your needs)
     deploy:
