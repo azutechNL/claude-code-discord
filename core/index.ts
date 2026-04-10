@@ -157,3 +157,10 @@ export {
   type SetupWizardDeps,
   runSetupWizard,
 } from "./session-setup.ts";
+
+// /honcho status/peer/sessions slash commands
+export {
+  type HonchoCommandDeps,
+  honchoCommands,
+  createHonchoCommandHandlers,
+} from "./honcho-commands.ts";

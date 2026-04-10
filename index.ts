@@ -33,6 +33,7 @@ import {
   createPersonaCommandHandlers,
   mergePersonaIntoOptions,
   createSessionCommandHandlers,
+  createHonchoCommandHandlers,
   runSetupWizard,
 } from "./core/index.ts";
 import type { ClaudeModelOptions } from "./claude/index.ts";
@@ -365,6 +366,12 @@ export async function createClaudeCodeBot(config: BotConfig) {
       setSessionForChannel: allHandlers.claude.setSessionForChannel,
       globalWorkDir: workDir,
     }),
+    honchoCommandHandlers: honchoClient
+      ? createHonchoCommandHandlers({
+          apiUrl: Deno.env.get("HONCHO_API_URL") ?? "http://honcho-api:8000",
+          workspaceId: Deno.env.get("HONCHO_WORKSPACE_ID") ?? "discord-bot",
+        })
+      : undefined,
   });
 
   // Create button handlers using the button handler factory

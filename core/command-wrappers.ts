@@ -42,6 +42,8 @@ export interface CommandWrapperDeps {
   personaCommandHandlers?: CommandHandlers;
   /** Optional /session command handlers. When omitted, /session is not registered. */
   sessionCommandHandlers?: CommandHandlers;
+  /** Optional /honcho command handlers. When omitted, /honcho is not registered. */
+  honchoCommandHandlers?: CommandHandlers;
 }
 
 // ================================
@@ -613,6 +615,7 @@ export function createAllCommandHandlers(deps: CommandWrapperDeps): CommandHandl
     ...(deps.bindCommandHandlers ?? new Map()),
     ...(deps.personaCommandHandlers ?? new Map()),
     ...(deps.sessionCommandHandlers ?? new Map()),
+    ...(deps.honchoCommandHandlers ?? new Map()),
   ]);
 
   return commandHandlers;
