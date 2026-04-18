@@ -71,6 +71,25 @@ export class HonchoClient {
     return res.json();
   }
 
+  /** Generic request helper for PUT/PATCH/DELETE verbs. */
+  private async request(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<unknown> {
+    const res = await fetch(this.url(path), {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Honcho ${method} ${path}: ${res.status} ${text.slice(0, 200)}`);
+    }
+    if (res.status === 204) return undefined;
+    return res.json().catch(() => undefined);
+  }
+
   // ────────── Workspace ──────────
 
   /** Ensure the workspace exists (idempotent). */
@@ -86,17 +105,63 @@ export class HonchoClient {
 
   // ────────── Peers ──────────
 
-  /** Get or create a peer (idempotent). */
-  async getOrCreatePeer(peerId: string, name?: string): Promise<void> {
+  /**
+   * Get or create a peer (idempotent). Pass `metadata` to store structured
+   * facts (display_name, alias, kind, skills, etc) alongside the peer —
+   * Honcho's deriver can read this when building observations.
+   */
+  async getOrCreatePeer(
+    peerId: string,
+    opts?: { metadata?: Record<string, unknown>; configuration?: Record<string, unknown> },
+  ): Promise<void> {
     try {
-      await this.post("/peers", { id: peerId, name: name ?? peerId });
+      // deno-lint-ignore no-explicit-any
+      const body: Record<string, any> = { id: peerId };
+      if (opts?.metadata) body.metadata = opts.metadata;
+      if (opts?.configuration) body.configuration = opts.configuration;
+      await this.post("/peers", body);
     } catch (err) {
-      // 409/422 = already exists, which is fine
       const msg = err instanceof Error ? err.message : "";
       if (!msg.includes("409") && !msg.includes("422") && !msg.includes("already")) {
         throw err;
       }
     }
+  }
+
+  /** Update a peer's metadata in place (idempotent). */
+  async updatePeerMetadata(
+    peerId: string,
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    // Honcho uses PUT on /peers/{peer_id} for updates — fall back to PATCH on failure
+    try {
+      await this.request("PUT", `/peers/${encodeURIComponent(peerId)}`, { metadata });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("405") || msg.includes("Method Not Allowed")) {
+        await this.request("PATCH", `/peers/${encodeURIComponent(peerId)}`, { metadata });
+        return;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Directly set a peer's card — a list of string facts that describe the
+   * peer. Used for level-4 seeding where we push team.json facts into
+   * Honcho before any conversation happens.
+   */
+  async setPeerCard(
+    peerId: string,
+    facts: string[],
+    opts?: { target?: string },
+  ): Promise<void> {
+    const query = opts?.target ? `?target=${encodeURIComponent(opts.target)}` : "";
+    await this.request(
+      "PUT",
+      `/peers/${encodeURIComponent(peerId)}/card${query}`,
+      { peer_card: facts },
+    );
   }
 
   // ────────── Sessions ──────────
@@ -134,9 +199,22 @@ export class HonchoClient {
 
   // ────────── Context ──────────
 
-  /** Get session context (messages + summary + peer representation). */
-  async getContext(sessionId: string): Promise<HonchoContext> {
-    return (await this.get(`/sessions/${sessionId}/context`)) as HonchoContext;
+  /**
+   * Get session context (messages + summary). When `peerTarget` is
+   * provided, the response also includes `peer_representation` and
+   * `peer_card` scoped to that peer — so multi-human sessions don't
+   * bleed one person's profile into another's prompt.
+   */
+  async getContext(
+    sessionId: string,
+    opts?: { peerTarget?: string; tokens?: number },
+  ): Promise<HonchoContext> {
+    const params = new URLSearchParams();
+    if (opts?.peerTarget) params.set("peer_target", opts.peerTarget);
+    if (opts?.tokens) params.set("tokens", String(opts.tokens));
+    const qs = params.toString();
+    const path = `/sessions/${encodeURIComponent(sessionId)}/context${qs ? `?${qs}` : ""}`;
+    return (await this.get(path)) as HonchoContext;
   }
 
   /** Get a peer's cross-session context / representation. */

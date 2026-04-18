@@ -27,6 +27,25 @@ export {
   type HonchoMcpContext,
   buildHonchoMcpServer,
 } from "./honcho-mcp.ts";
+export {
+  type JiraClientConfig,
+  type JiraIssue,
+  type CreateIssueInput,
+  JiraClient,
+  getJiraConfig,
+  buildJiraClient,
+} from "./jira-client.ts";
+export { buildJiraMcpServer } from "./jira-mcp.ts";
+export {
+  type TeamClientConfig,
+  type TeamMember,
+  type TeamMemberKind,
+  type TeamRegistry,
+  TeamClient,
+  getTeamConfig,
+  buildTeamClient,
+} from "./team-client.ts";
+export { buildTeamMcpServer } from "./team-mcp.ts";
 export { convertToClaudeMessages } from "./message-converter.ts";
 export {
   enhancedClaudeCommands,
