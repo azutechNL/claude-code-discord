@@ -49,6 +49,8 @@ the bot's defaults (global `WORK_DIR`, default model, full tool set).
 | `permissionMode` | SDK `permissionMode` | `bypassPermissions` (YOLO), `acceptEdits`, `plan`, `dontAsk`, `default`. Runtime falls back to `bypassPermissions` when omitted (the bot is YOLO by default). |
 | `enableOpenclaw` | — (bot-specific) | When true, the bot injects its in-process OpenClaw MCP server into this persona's `mcpServers` so the agent can delegate to OpenClaw via `openclaw_delegate`. |
 | `enableHoncho` | — (bot-specific) | When true, the bot (1) fetches user context from Honcho before each query and injects it into the system prompt, (2) stores conversation turns after each response, and (3) exposes `honcho_context`, `honcho_search`, `honcho_ask`, `honcho_remember` MCP tools. Requires `HONCHO_API_URL` env. |
+| `enableJira` | — (bot-specific) | When true, the bot injects its in-process Jira MCP server (`jira_create_issue`, `jira_get_issue`, `jira_update_issue`, `jira_add_comment`, `jira_list_issues`, `jira_list_open_bot_issues`, `jira_transition_issue`). Every create auto-injects the `JIRA_BOT_LABEL` (default `pm-bot`). Requires `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY` env. Used by the `project-manager` persona. |
+| `enableTeam` | — (bot-specific) | When true, the bot injects its in-process team registry MCP server (`team_list`, `team_get_member`, `team_upsert_member`) that reads/writes a bind-mounted `team.json`. Atomic writes, no general `Write` access needed. Pair with `enableHoncho` to split structured identity facts (team.json) from fuzzy preference memory (Honcho). Used by the `project-manager` persona. |
 | `plugins` | SDK `plugins` | Claude Code local plugins. |
 | `skills` | SDK `skills` | Namespaced skill names. |
 
@@ -85,6 +87,7 @@ Don't set `agent` unless you want a named agent to *be* the lead. When
 - **bot-maintainer** — maintains this repo, opus, full tools, knows the architecture. Honcho enabled.
 - **code-reviewer** — read-only audit mode, sonnet, denies Write/Edit/Bash.
 - **memory-enhanced** — sonnet, YOLO, Honcho + OpenClaw. Best for daily work sessions.
+- **project-manager** — sonnet, YOLO, Honcho + Jira + Team. Plans work across humans + agent personas. Beads-first workflow: every task becomes a bead first, then mirrors to Jira (NLITX) with the `pm-bot` label. Never writes code. Always shows a plan preview before creating tickets. First tool call of every session is `team_list`; stores structured identity (Jira accountId, Discord user ID, skills) in `team.json` via the team MCP tools, keeps Honcho for fuzzy preferences only.
 
 ## Adding a persona
 
