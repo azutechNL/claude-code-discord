@@ -1,0 +1,115 @@
+{
+  "description": "Team registry for the project-manager persona. Each entry maps a member to a skill set, a kind (human or agent), and optional routing metadata. Matches are substring-based on skills, so list skills in the widest form you expect to reference. Copy this file to data/team.json (gitignored) and fill in real values — the live file stays out of source control.",
+  "members": [
+    {
+      "id": "human-id",
+      "kind": "human",
+      "display_name": "Display Name",
+      "jira_account_id": "<jira-accountId>",
+      "discord_user_id": "<discord-snowflake>",
+      "skills": [
+        "product",
+        "review",
+        "ops"
+      ],
+      "notes": "Free-form notes about role, decision authority, working preferences."
+    },
+    {
+      "id": "bot-maintainer",
+      "kind": "agent",
+      "display_name": "claude-discord bot maintainer",
+      "persona": "bot-maintainer",
+      "skills": [
+        "bot",
+        "typescript",
+        "deno",
+        "discord.js",
+        "mcp",
+        "infra",
+        "backend"
+      ],
+      "notes": "Edits the claude-discord repo. Use for bot changes, new personas, MCP servers."
+    },
+    {
+      "id": "docs-writer",
+      "kind": "agent",
+      "display_name": "Docs writer",
+      "persona": "docs-writer",
+      "skills": [
+        "docs",
+        "writing",
+        "markdown",
+        "readme",
+        "content"
+      ],
+      "notes": "Writes/edits documentation. Read+Write+Edit only, no code."
+    },
+    {
+      "id": "code-reviewer",
+      "kind": "agent",
+      "display_name": "Code reviewer",
+      "persona": "code-reviewer",
+      "skills": [
+        "review",
+        "code-review",
+        "release-notes",
+        "changelog",
+        "audit"
+      ],
+      "notes": "Read-only. Functional depth — release notes, what-shipped summaries, PR/MR reviews."
+    },
+    {
+      "id": "architect",
+      "kind": "agent",
+      "display_name": "Architect",
+      "persona": "architect",
+      "skills": [
+        "architecture",
+        "design",
+        "landscape",
+        "tech-debt",
+        "trade-offs"
+      ],
+      "notes": "Read-only. Technical depth — architecture analysis, design brainstorming, impact analysis."
+    },
+    {
+      "id": "market-researcher",
+      "kind": "agent",
+      "display_name": "Market researcher",
+      "persona": "market-researcher",
+      "skills": [
+        "research",
+        "market",
+        "scraping",
+        "webfetch",
+        "websearch"
+      ],
+      "notes": "Delegates heavy scraping to OpenClaw. Good for anything that needs fresh web data."
+    },
+    {
+      "id": "memory-enhanced",
+      "kind": "agent",
+      "display_name": "Memory-enhanced assistant",
+      "persona": "memory-enhanced",
+      "skills": [
+        "general",
+        "recall",
+        "context"
+      ],
+      "notes": "Honcho + OpenClaw enabled. Use when continuity matters more than specialization."
+    },
+    {
+      "id": "orchestrator",
+      "kind": "agent",
+      "display_name": "Project orchestrator",
+      "persona": "orchestrator",
+      "skills": [
+        "coordination",
+        "delegation",
+        "beads",
+        "planning"
+      ],
+      "notes": "In-repo coordinator. PM delegates single-repo execution to orchestrator channels."
+    }
+  ]
+}

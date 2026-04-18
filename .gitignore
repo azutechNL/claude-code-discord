@@ -55,6 +55,11 @@ dist
 *token.json*
 *credentials.json*
 
+# Team registry (real names, Discord/Jira IDs, sometimes contact info).
+# Live file lives on host, bind-mounted into container at runtime.
+# Schema is documented in data/team.json.example.
+data/team.json
+
 # Logs and debug files
 npm-debug.log*
 yarn-debug.log*
