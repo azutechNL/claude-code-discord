@@ -39,7 +39,7 @@ import {
 import type { ClaudeModelOptions } from "./claude/index.ts";
 
 import { getGitInfo } from "./git/index.ts";
-import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks, buildDashboardHooks, getDashboardEndpoints, mergeHooks, buildOpenclawMcpServer, buildHonchoClient, buildHonchoMcpServer, type HonchoMcpContext } from "./claude/index.ts";
+import { createClaudeSender, createQuietClaudeSender, expandableContent, sendToClaudeCode, convertToClaudeMessages, type DiscordSender, type ClaudeMessage, type SessionThreadCallbacks, buildDashboardHooks, getDashboardEndpoints, mergeHooks, buildOpenclawMcpServer, buildHonchoClient, buildHonchoMcpServer, type HonchoMcpContext, buildJiraClient, buildJiraMcpServer, buildTeamClient, buildTeamMcpServer } from "./claude/index.ts";
 import { buildQuestionMessages, parseAskUserButtonId, parseAskUserConfirmId, type AskUserQuestionInput } from "./claude/index.ts";
 import { buildPermissionEmbed, parsePermissionButtonId, type PermissionRequestCallback } from "./claude/index.ts";
 import { claudeCommands, enhancedClaudeCommands } from "./claude/index.ts";
@@ -169,6 +169,107 @@ export async function createClaudeCodeBot(config: BotConfig) {
   const honchoMcpServer = honchoClient
     ? buildHonchoMcpServer(honchoClient, () => honchoMcpContext)
     : undefined;
+
+  // Jira client + MCP — built once, injected into any persona that has
+  // enableJira: true. No-op when the JIRA_* env vars are unset. Used by
+  // the project-manager persona for beads-first, Jira-mirror workflow.
+  const jiraClient = buildJiraClient();
+  const jiraMcpServer = jiraClient ? buildJiraMcpServer(jiraClient) : undefined;
+  if (jiraClient) {
+    try {
+      const accountId = await jiraClient.verifyAuth();
+      console.log(`[jira] client ready for project ${jiraClient.config.projectKey} as accountId=${accountId.slice(0, 12)}…`);
+    } catch (err) {
+      console.error("[jira] auth verification failed:", err instanceof Error ? err.message : err);
+    }
+  } else {
+    console.log("[jira] not configured — JIRA_BASE_URL/EMAIL/API_TOKEN/PROJECT_KEY missing");
+  }
+
+  // Team registry client + MCP — built once, injected into personas with
+  // enableTeam: true. Reads and writes team.json via atomic file ops.
+  // No-op when team.json doesn't exist at TEAM_JSON_PATH (default /app/team.json).
+  const teamClient = buildTeamClient();
+  const teamMcpServer = teamClient ? buildTeamMcpServer(teamClient) : undefined;
+  if (teamClient) {
+    try {
+      const members = await teamClient.list();
+      console.log(`[team] registry ready at ${teamClient.config.filePath} (${members.length} members)`);
+    } catch (err) {
+      console.error("[team] registry load failed:", err instanceof Error ? err.message : err);
+    }
+  } else {
+    console.log("[team] not configured — team.json not found");
+  }
+
+  // ── Honcho × team.json bootstrap ─────────────────────────────────
+  // Resolve a Discord user ID to a stable Honcho peer name. If the user
+  // exists in team.json, use their team.json id (e.g. "karim", "mohamed")
+  // so Honcho's deriver writes readable observations. Otherwise fall
+  // back to a namespaced discord-<id> so profiles stay distinct.
+  const resolveHonchoPeerId = async (discordUserId: string): Promise<string> => {
+    if (!teamClient) return `discord-${discordUserId}`;
+    try {
+      const m = await teamClient.findByDiscordId(discordUserId);
+      return m?.id ?? `discord-${discordUserId}`;
+    } catch {
+      return `discord-${discordUserId}`;
+    }
+  };
+
+  // Seed every human in team.json as a Honcho peer with metadata + peer
+  // card so multi-peer profiling has a clean starting point. Runs once
+  // at startup; safe to re-run (peer creation is idempotent, card PUT
+  // overwrites). No-op when either client is missing.
+  if (honchoClient && teamClient) {
+    try {
+      const members = await teamClient.list();
+      const humans = members.filter((m) => m.kind === "human");
+      let seeded = 0;
+      for (const m of humans) {
+        const peerId = m.id;
+        const metadata: Record<string, unknown> = {
+          display_name: m.display_name,
+          kind: m.kind,
+          skills: m.skills,
+          source: "team.json",
+        };
+        if (m.alias) metadata.alias = m.alias;
+        if (m.jira_account_id) metadata.jira_account_id = m.jira_account_id;
+        if (m.discord_user_id) metadata.discord_user_id = m.discord_user_id;
+        if (m.notes) metadata.notes = m.notes;
+        try {
+          await honchoClient.getOrCreatePeer(peerId, { metadata });
+          // Build a concise peer card from team.json facts — one fact per
+          // line, Honcho stores these as the initial representation.
+          const facts: string[] = [
+            `${m.display_name}${m.alias ? ` (known as "${m.alias}")` : ""} is a ${m.kind} member of the NL-ITX workscape team.`,
+          ];
+          if (m.skills.length > 0) {
+            facts.push(`Skills: ${m.skills.join(", ")}.`);
+          }
+          if (m.jira_account_id) {
+            facts.push(`Jira accountId: ${m.jira_account_id}.`);
+          }
+          if (m.discord_user_id) {
+            facts.push(`Discord user id: ${m.discord_user_id}.`);
+          }
+          if (m.notes) {
+            facts.push(m.notes);
+          }
+          await honchoClient.setPeerCard(peerId, facts);
+          seeded++;
+        } catch (err) {
+          console.warn(
+            `[honcho] seed failed for peer '${peerId}': ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      }
+      console.log(`[honcho] seeded ${seeded}/${humans.length} human peer(s) from team.json`);
+    } catch (err) {
+      console.warn("[honcho] team.json bootstrap failed:", err instanceof Error ? err.message : err);
+    }
+  }
 
   // Initialize dynamic model fetching (uses ANTHROPIC_API_KEY if available)
   initModels();
@@ -452,6 +553,16 @@ export async function createClaudeCodeBot(config: BotConfig) {
       /** Message to react ⏳/✅ on for visual ack. */
       // deno-lint-ignore no-explicit-any
       triggerMessage?: any;
+      /** Fires with the raw Claude response text. Used by the voice-query
+       *  HTTP endpoint to capture the response for TTS playback, since the
+       *  function itself still returns sessionId to preserve existing
+       *  text-channel callers. */
+      onResponse?: (text: string) => void;
+      /** Extra system prompt text appended to whatever the persona sets.
+       *  Used by voice queries to inject TTS-friendliness instructions
+       *  (English-only, plain text, no emoji) per-call without changing
+       *  the persona preset. */
+      extraSystemPrompt?: string;
     } = {},
   ): Promise<string | undefined> => {
     // If channel has no binding (no workDir, no persona), show the
@@ -502,6 +613,14 @@ export async function createClaudeCodeBot(config: BotConfig) {
       modelOptions.permissionMode = "bypassPermissions";
     }
 
+    // Caller-supplied extra system prompt (e.g. voice query adds
+    // TTS-friendliness instructions).
+    if (opts.extraSystemPrompt) {
+      modelOptions.appendSystemPrompt = modelOptions.appendSystemPrompt
+        ? `${modelOptions.appendSystemPrompt}\n\n${opts.extraSystemPrompt}`
+        : opts.extraSystemPrompt;
+    }
+
     // Inject the in-process OpenClaw MCP server when the persona opts in.
     if (persona?.enableOpenclaw && openclawMcpServer) {
       modelOptions.mcpServers = {
@@ -510,30 +629,104 @@ export async function createClaudeCodeBot(config: BotConfig) {
       };
     }
 
-    // ── Honcho: set MCP context + inject pre-query user context ──
+    // Inject the in-process Jira MCP server when the persona opts in.
+    if (persona?.enableJira && jiraMcpServer) {
+      modelOptions.mcpServers = {
+        ...(modelOptions.mcpServers ?? {}),
+        jira: jiraMcpServer,
+      };
+    }
+
+    // Inject the in-process team registry MCP server when the persona opts in.
+    if (persona?.enableTeam && teamMcpServer) {
+      modelOptions.mcpServers = {
+        ...(modelOptions.mcpServers ?? {}),
+        team: teamMcpServer,
+      };
+    }
+
+    // ── Per-message identity header (NOT system prompt) ──
+    // The Claude Agent SDK caches the system prompt at session creation,
+    // so anything we append there is frozen at whoever started the session.
+    // In a multi-user channel, a stale system-prompt identity makes the
+    // persona misidentify every follow-up sender. Instead, we prepend a
+    // fresh <msg_sender> tag to the user prompt itself — the prompt is
+    // always sent as a new turn, never cached.
+    const triggerUserId = opts.triggerMessage?.author?.id ?? "unknown";
+    const triggerUserTag = opts.triggerMessage?.author?.tag
+      ?? opts.triggerMessage?.author?.username
+      ?? "unknown";
+    let effectivePrompt = prompt;
+    if (persona?.enableTeam && triggerUserId !== "unknown") {
+      const senderTag =
+        `<msg_sender discord_user_id="${triggerUserId}" ` +
+        `discord_username="${triggerUserTag}" channel_id="${channelId}" />\n\n`;
+      effectivePrompt = `${senderTag}${prompt}`;
+    }
+
+    // ── Honcho: resolve stable peer id + peer-scoped context pull ──
+    // Discord ID → team.json id (when known) → Honcho peer name. This
+    // gives readable peer names in Honcho observations AND ensures that
+    // seed / message / context all target the same peer, so multi-human
+    // sessions don't blend one person's profile into another's.
     const honchoUserId = opts.triggerMessage?.author?.id ?? "unknown";
+    const tPhase_honchoResolve = Date.now();
+    const honchoPeerId = honchoUserId !== "unknown" && honchoClient
+      ? await resolveHonchoPeerId(honchoUserId)
+      : honchoUserId;
+    const honchoResolveMs = Date.now() - tPhase_honchoResolve;
     if (persona?.enableHoncho && honchoMcpServer && honchoUserId !== "unknown") {
-      honchoMcpContext = { userId: honchoUserId, channelId };
+      honchoMcpContext = { userId: honchoPeerId, channelId };
       modelOptions.mcpServers = {
         ...(modelOptions.mcpServers ?? {}),
         honcho: honchoMcpServer,
       };
     }
+    const tPhase_honchoPre = Date.now();
     if (persona?.enableHoncho && honchoClient && honchoUserId !== "unknown") {
       try {
-        await honchoClient.getOrCreatePeer(honchoUserId);
+        // Ensure the peer exists. When team.json knows this Discord user,
+        // we'll seed metadata; otherwise create a bare peer so new users
+        // still get tracked distinctly.
+        if (teamClient) {
+          const member = await teamClient.findByDiscordId(honchoUserId);
+          if (member) {
+            const metadata: Record<string, unknown> = {
+              display_name: member.display_name,
+              kind: member.kind,
+              skills: member.skills,
+              source: "team.json",
+            };
+            if (member.alias) metadata.alias = member.alias;
+            if (member.jira_account_id) metadata.jira_account_id = member.jira_account_id;
+            if (member.discord_user_id) metadata.discord_user_id = member.discord_user_id;
+            await honchoClient.getOrCreatePeer(honchoPeerId, { metadata });
+          } else {
+            await honchoClient.getOrCreatePeer(honchoPeerId, {
+              metadata: {
+                source: "discord-auto",
+                discord_user_id: honchoUserId,
+                discord_username: triggerUserTag,
+              },
+            });
+          }
+        } else {
+          await honchoClient.getOrCreatePeer(honchoPeerId);
+        }
         await honchoClient.getOrCreateSession(channelId, {
-          [honchoUserId]: { observe_me: true, observe_others: false },
+          [honchoPeerId]: { observe_me: true, observe_others: false },
           "claude-bot": { observe_me: false, observe_others: true },
         });
-        const ctx = await honchoClient.getContext(channelId);
-        // Build a compact context block from summary + peer representation
+        // Peer-scoped context fetch — level-1 fix. When peer_target is
+        // set, the response contains peer_representation + peer_card
+        // scoped to this peer only, not a session-wide blend.
+        const ctx = await honchoClient.getContext(channelId, { peerTarget: honchoPeerId });
         const parts: string[] = [];
         if (ctx.peer_representation) parts.push(`User profile: ${ctx.peer_representation}`);
         if (ctx.peer_card) parts.push(`User card: ${ctx.peer_card}`);
         if (ctx.summary) parts.push(`Session summary: ${ctx.summary}`);
         if (parts.length > 0) {
-          const contextBlock = `\n\n<honcho_user_context>\n${parts.join("\n\n")}\n</honcho_user_context>`;
+          const contextBlock = `\n\n<honcho_user_context peer=\"${honchoPeerId}\">\n${parts.join("\n\n")}\n</honcho_user_context>`;
           modelOptions.appendSystemPrompt = modelOptions.appendSystemPrompt
             ? `${modelOptions.appendSystemPrompt}${contextBlock}`
             : contextBlock;
@@ -542,6 +735,7 @@ export async function createClaudeCodeBot(config: BotConfig) {
         console.warn("[honcho] pre-query context failed:", err instanceof Error ? err.message : err);
       }
     }
+    const honchoPreMs = Date.now() - tPhase_honchoPre;
 
     // Attach dashboard-forwarding hooks (fires fire-and-forget HTTP POSTs
     // to agent-monitor + agents-observe sidecars). No-op if disabled.
@@ -559,9 +753,10 @@ export async function createClaudeCodeBot(config: BotConfig) {
     try { await channel.sendTyping?.(); } catch { /* ignore */ }
 
     try {
+      const tPhase_sdk = Date.now();
       const result = await sendToClaudeCode(
         channelWorkDir,
-        prompt,
+        effectivePrompt,
         controller,
         existingSessionId,
         undefined,
@@ -572,18 +767,34 @@ export async function createClaudeCodeBot(config: BotConfig) {
         false,
         modelOptions,
       );
+      const sdkMs = Date.now() - tPhase_sdk;
+      // One-line phase breakdown so we can see where time is going.
+      console.log(
+        `[runPromptInChannel] phases: honcho-resolve=${honchoResolveMs}ms honcho-pre=${honchoPreMs}ms ` +
+        `sdk=${sdkMs}ms persona=${persona?.name ?? "none"} resumed=${Boolean(existingSessionId)}`,
+      );
       if (result.sessionId) {
         allHandlers.claude.setSessionForChannel(channelId, result.sessionId);
       }
 
+      // Bubble the response text up via optional callback (used by voice).
+      if (opts.onResponse && result.response) {
+        try { opts.onResponse(result.response); } catch { /* ignore */ }
+      }
+
       // ── Honcho post-query: store conversation turn (fire-and-forget) ──
+      // Attribute the user turn to the RESOLVED peer id (team.json id when
+      // known, otherwise discord-<snowflake>) so it lands on the same
+      // peer card the pre-query fetch is reading from.
       if (persona?.enableHoncho && honchoClient && result.response && honchoUserId !== "unknown") {
         const botPeerId = "claude-bot";
         void (async () => {
           try {
-            await honchoClient.getOrCreatePeer(botPeerId, "Claude Bot");
+            await honchoClient.getOrCreatePeer(botPeerId, {
+              metadata: { display_name: "Claude Bot", kind: "agent", source: "system" },
+            });
             await honchoClient.addMessages(channelId, [
-              { content: prompt, peer_id: honchoUserId },
+              { content: prompt, peer_id: honchoPeerId },
               { content: result.response.slice(0, 25000), peer_id: botPeerId },
             ]);
           } catch (err) {
@@ -910,6 +1121,137 @@ export async function createClaudeCodeBot(config: BotConfig) {
       // Periodic notification is best-effort
     }
   });
+
+  // ── Voice query HTTP server ──────────────────────────────────────
+  // Small HTTP server for the voice-worker sidecar to POST transcribed
+  // speech into. Reuses the same runPromptInChannel pipeline that handles
+  // ambient text messages, so voice turns get persona + Honcho + Jira +
+  // team.json for free. Bound to 0.0.0.0:8300 so the sibling container
+  // can reach it via the claude-network bridge at claude-bot:8300.
+  const voiceQueryPort = Number(Deno.env.get("VOICE_QUERY_PORT") ?? "8300");
+  const voiceQueryToken = Deno.env.get("BOT_QUERY_TOKEN") ?? "";
+  const voiceDefaultPersona = Deno.env.get("VOICE_PERSONA") ?? "memory-enhanced";
+  Deno.serve(
+    { port: voiceQueryPort, hostname: "0.0.0.0", onListen: ({ hostname, port }) => {
+      console.log(`[voice-query] HTTP server listening on ${hostname}:${port} (persona=${voiceDefaultPersona})`);
+    }},
+    async (req) => {
+      const url = new URL(req.url);
+      if (req.method === "GET" && url.pathname === "/health") {
+        return new Response(JSON.stringify({ status: "ok", persona: voiceDefaultPersona }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (req.method === "POST" && url.pathname === "/voice/query") {
+        try {
+          // Optional bearer token check
+          if (voiceQueryToken) {
+            const auth = req.headers.get("authorization") ?? "";
+            if (auth !== `Bearer ${voiceQueryToken}`) {
+              return new Response("unauthorized", { status: 401 });
+            }
+          }
+          // deno-lint-ignore no-explicit-any
+          const body = await req.json() as any;
+          const text: string = body.text ?? "";
+          const discordUserId: string = body.discord_user_id ?? "unknown";
+          const discordUsername: string = body.discord_username ?? "voice-user";
+          const voiceChannelId: string = body.voice_channel_id ?? "voice-default";
+          if (!text.trim()) {
+            return new Response(JSON.stringify({ error: "empty text" }), {
+              status: 400, headers: { "Content-Type": "application/json" },
+            });
+          }
+          // Ensure the voice channel's binding matches the current
+          // VOICE_PERSONA env. Always-overwrite (not just on first hit)
+          // so an operator can flip VOICE_PERSONA and restart to change
+          // which persona voice turns run under — without manual /bind.
+          const existingBinding = channelBindings.get(voiceChannelId);
+          if (
+            !existingBinding ||
+            existingBinding.personaName !== voiceDefaultPersona ||
+            existingBinding.workDir !== workDir
+          ) {
+            await channelBindings.set(voiceChannelId, {
+              workDir: workDir,
+              personaName: voiceDefaultPersona,
+            });
+            allHandlers.claude.setSessionForChannel(voiceChannelId, undefined);
+            console.log(`[voice-query] (re)bound ${voiceChannelId} → persona=${voiceDefaultPersona}, workDir=${workDir} (session cleared)`);
+          }
+
+          // Stateless voice mode: clear the session id BEFORE each query
+          // so the SDK doesn't waste 1+ second replaying history. Each
+          // voice turn becomes a fresh session. Trade-off is loss of
+          // conversational continuity, which is acceptable for the voice
+          // channel's chat-style use case. Toggle with VOICE_STATELESS=0.
+          if (Deno.env.get("VOICE_STATELESS") !== "0") {
+            allHandlers.claude.setSessionForChannel(voiceChannelId, undefined);
+          }
+          // Build a synthetic trigger message that carries the Discord
+          // user ID through the normal identity-resolution path.
+          const syntheticTrigger = {
+            author: { id: discordUserId, tag: discordUsername, username: discordUsername },
+            react: async () => { /* no-op for voice */ },
+          };
+          // Call the exact same path ambient text messages take. Capture
+          // response by intercepting the stub channel.send() calls — the
+          // sender pipeline writes finalized message content there, which
+          // is more reliable than the result.response field (which can be
+          // empty even when Claude produced text output via streaming).
+          console.log(`[voice-query] incoming text="${text.slice(0,60)}" from=${discordUsername}(${discordUserId})`);
+          const tRun = Date.now();
+          const captured: string[] = [];
+          await runPromptInChannel(
+            // deno-lint-ignore no-explicit-any
+            {
+              send: async (msg: unknown) => {
+                // deno-lint-ignore no-explicit-any
+                const raw = typeof msg === "string" ? msg : ((msg as any)?.content ?? "");
+                if (typeof raw !== "string" || !raw) return;
+                // Skip the session footer ("-# session abc · sonnet · 3.2s · $0.01")
+                // and any pure-formatting lines.
+                if (raw.startsWith("-# session ")) return;
+                captured.push(raw);
+              },
+              sendTyping: async () => {},
+            } as any,
+            voiceChannelId,
+            text,
+            {
+              quiet: true,
+              // deno-lint-ignore no-explicit-any
+              triggerMessage: syntheticTrigger as any,
+              extraSystemPrompt:
+                "## Voice channel mode\n" +
+                "You are speaking through a text-to-speech engine into a Discord voice channel. " +
+                "Follow these rules STRICTLY, overriding any other formatting instructions:\n" +
+                "- **Always reply in English**, regardless of what language the speaker used. Do not translate, just respond naturally in English.\n" +
+                "- Use **plain text only**. No markdown, no code blocks, no bullet lists, no headings, no bold/italic.\n" +
+                "- **Never use emoji or emoticons.** They will be read literally by the TTS and sound wrong.\n" +
+                "- Keep responses **short and conversational** — ideally 1-2 sentences, max 3. Long paragraphs are painful to listen to.\n" +
+                "- Write numbers as digits (e.g. '5', not 'five') unless the word form is clearer.\n" +
+                "- Expand acronyms the first time unless they're already famous (NASA, API, etc.).\n" +
+                "- Do not preface responses with greetings unless the user greets you first.",
+            },
+          );
+          const finalResponse = captured.join("\n").trim();
+          const runMs = Date.now() - tRun;
+          console.log(`[voice-query] done runPromptInChannel=${runMs}ms captured=${captured.length} len=${finalResponse.length}`);
+          return new Response(JSON.stringify({ response: finalResponse }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error("[voice-query] handler error:", msg);
+          return new Response(JSON.stringify({ error: msg }), {
+            status: 500, headers: { "Content-Type": "application/json" },
+          });
+        }
+      }
+      return new Response("not found", { status: 404 });
+    },
+  );
 
   // Setup signal handlers for graceful shutdown
   setupSignalHandlers({
