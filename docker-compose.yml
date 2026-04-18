@@ -47,6 +47,20 @@ services:
       - OPENCLAW_BRIDGE_TOKEN=${OPENCLAW_BRIDGE_TOKEN:-}
       - HONCHO_API_URL=${HONCHO_API_URL:-http://honcho-api:8000}
       - HONCHO_WORKSPACE_ID=${HONCHO_WORKSPACE_ID:-discord-bot}
+      - JIRA_BASE_URL=${JIRA_BASE_URL:-}
+      - JIRA_EMAIL=${JIRA_EMAIL:-}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN:-}
+      - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY:-}
+      - JIRA_BOARD_ID=${JIRA_BOARD_ID:-}
+      - JIRA_DEFAULT_ISSUE_TYPE=${JIRA_DEFAULT_ISSUE_TYPE:-Task}
+      - JIRA_BOT_LABEL=${JIRA_BOT_LABEL:-pm-bot}
+      - TEAM_JSON_PATH=${TEAM_JSON_PATH:-/app/data/team.json}
+
+    # Publish the voice-query HTTP server port to the host loopback so
+    # the host-networked voice-worker sidecar can reach it. Bound to
+    # 127.0.0.1 so it's not exposed on the LAN.
+    ports:
+      - "127.0.0.1:8300:8300"
 
     # Volume mounts for persistence and workspace access
     volumes:
@@ -61,8 +75,17 @@ services:
       - /home/karim/bin/dolt:/usr/local/bin/dolt:ro
       - /home/karim/.local/bin/bd.bin:/usr/local/bin/bd.bin:ro
       - ./scripts/bd-container.sh:/usr/local/bin/bd:ro
-      # Git credentials for git.theoffice210.nl (GitLab PAT via HTTPS)
-      - /home/karim/.git-credentials-container/.git-credentials:/home/claude/.git-credentials:ro
+      # Git auth: host's gitconfig carries the http.extraHeader for
+      # git.theoffice210.nl (GitLab PAT base64-encoded). This replaces the
+      # previous credential.helper=store approach, which broke because the
+      # helper's relative .git/credentials path doesn't exist inside cloned
+      # nl-itx app repos. See chat 2026-04-17.
+      - /home/karim/.gitconfig:/home/claude/.gitconfig:ro
+      # Team registry data — bind-mount the parent dir (not the file) so
+      # rename() operations on the host remain visible to the container.
+      # Used by project-manager persona's team MCP tools (team_list,
+      # team_get_member, team_upsert_member).
+      - /home/karim/claude-discord/data:/app/data:rw
 
     # Resource limits (adjust based on your needs)
     deploy:
@@ -215,6 +238,13 @@ services:
     container_name: honcho-deriver
     entrypoint: ["/app/.venv/bin/python", "-m", "src.deriver"]
     restart: unless-stopped
+    # Disable inherited healthcheck from the Honcho base image — it
+    # probes http://localhost:8000/health which only the api container
+    # serves. The deriver is a background queue worker with no HTTP
+    # endpoint; the inherited check always fails and flips the
+    # container to "unhealthy" even when the deriver is working fine.
+    healthcheck:
+      disable: true
     depends_on:
       honcho-db:
         condition: service_healthy
@@ -228,6 +258,69 @@ services:
       - /home/karim/honcho/.env
     networks:
       - claude-network
+
+  piper-tts:
+    build:
+      context: /home/karim/piper-server
+      dockerfile: Dockerfile
+    image: piper-tts-api:latest
+    container_name: piper-tts
+    restart: unless-stopped
+    ports:
+      # Host port 8200 → container 8000. Exposed on LAN so the voice
+      # worker (which may live on a different machine later) can reach it.
+      - "8200:8000"
+    environment:
+      PIPER_VOICES_DIR: /voices
+      PIPER_DEFAULT_VOICE: en_US-lessac-medium
+    networks:
+      - claude-network
+
+  voice-worker:
+    build:
+      context: /home/karim/voice-worker
+      dockerfile: Dockerfile
+    image: voice-worker:latest
+    container_name: voice-worker
+    restart: unless-stopped
+    depends_on:
+      - claude-bot
+      - piper-tts
+    # Host networking is REQUIRED for Discord voice — the voice gateway
+    # relies on UDP with IP discovery, and Docker's bridge NAT breaks
+    # the handshake (connection hangs in 'signalling' forever). With host
+    # networking the container shares the host's network stack directly
+    # and UDP works. Trade-off: must use localhost:<published-port> to
+    # reach sibling containers, not service names.
+    network_mode: host
+    environment:
+      # Voice bot auth (separate Discord application from Kerry text bot)
+      VOICE_BOT_TOKEN: ${VOICE_BOT_TOKEN:-}
+      VOICE_CHANNEL_ID: ${VOICE_CHANNEL_ID:-}
+      VOICE_GUILD_ID: ${VOICE_GUILD_ID:-}
+      # STT endpoint (Whisper on the GPU host)
+      STT_URL: ${STT_URL:-http://192.168.3.199:8001}
+      STT_MODEL: ${STT_MODEL:-Systran/faster-whisper-large-v3}
+      STT_LANGUAGE: ${STT_LANGUAGE:-}
+      # TTS endpoint (Piper sibling, reached via host-published port 8200)
+      TTS_URL: http://localhost:8200
+      TTS_VOICE: ${TTS_VOICE:-en_US-lessac-medium}
+      # Main bot HTTP endpoint (host-published port 8300, see claude-bot service)
+      BOT_QUERY_URL: http://localhost:8300/voice/query
+      BOT_QUERY_TOKEN: ${BOT_QUERY_TOKEN:-}
+      # Test persona — override to point voice turns at any persona
+      VOICE_PERSONA: ${VOICE_PERSONA:-memory-enhanced}
+      # Trailing-silence window before an utterance is considered complete.
+      # Lower = faster response, higher = more tolerant of pauses.
+      SILENCE_MS: ${SILENCE_MS:-500}
+      NODE_ENV: production
+      # Force Node to prefer IPv4 for all DNS lookups. The host bmax has
+      # no working outbound IPv6, and Discord voice endpoints resolve to
+      # both AAAA and A records — without this flag, Node picks v6, the
+      # UDP handshake silently hangs, and the voice connection gets stuck
+      # in 'signalling' state forever. Applied via NODE_OPTIONS so it
+      # takes effect before any module code runs.
+      NODE_OPTIONS: "--dns-result-order=ipv4first"
 
 # Named volumes for data persistence
 volumes:
