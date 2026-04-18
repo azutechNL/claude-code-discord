@@ -34,6 +34,11 @@ export interface PersonaConfig {
   description: string;
   /** Appended to the Claude Code preset system prompt. */
   appendSystemPrompt?: string;
+  /** Raw system prompt that REPLACES the claude_code preset entirely.
+   *  Use for low-latency voice personas where the full code-agent preset
+   *  is unnecessary. Persona still uses appendSystemPrompt in tandem,
+   *  which gets concatenated on the end. */
+  systemPrompt?: string;
   /** Model alias: opus | sonnet | haiku (or a pinned full model ID). */
   model?: string;
   /** SDK permission mode. When the user trusts this persona fully, set
@@ -62,6 +67,21 @@ export interface PersonaConfig {
    *  (injected into system prompt) and stores conversation turns after
    *  each response. Requires HONCHO_API_URL env. */
   enableHoncho?: boolean;
+  /** If true, the bot injects the in-process Jira MCP server into this
+   *  persona's mcpServers so Claude can create/read/update tickets.
+   *  Requires JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN, JIRA_PROJECT_KEY
+   *  in the environment. Used by the project-manager persona. */
+  enableJira?: boolean;
+  /** If true, the bot injects the in-process team registry MCP server
+   *  so Claude can list/get/upsert team members in team.json. Provides
+   *  structured identity lookups (Jira accountId, Discord user ID,
+   *  skills) complementing Honcho's fuzzy preference memory. Requires
+   *  team.json to exist at TEAM_JSON_PATH (default /app/team.json). */
+  enableTeam?: boolean;
+  /** Override the SDK settingSources that load CLAUDE.md files. Default
+   *  is ['project','local'] which loads CLAUDE.md on every query (slow
+   *  for low-latency voice). Set to [] to skip the disk reads. */
+  settingSources?: ("project" | "local" | "user")[];
 }
 
 /**
@@ -161,17 +181,22 @@ export function mergePersonaIntoOptions<
   T extends {
     model?: string;
     appendSystemPrompt?: string;
+    systemPrompt?: string;
     allowedTools?: string[];
     disallowedTools?: string[];
     mcpServers?: Record<string, McpServerConfig>;
     agents?: Record<string, SDKAgentDefinition>;
     agent?: string;
     permissionMode?: SDKPermissionMode;
+    settingSources?: ("project" | "local" | "user")[];
   },
 >(target: T, persona: PersonaConfig | undefined): T {
   if (!persona) return target;
   if (persona.model && !target.model) target.model = persona.model;
   if (persona.permissionMode && !target.permissionMode) target.permissionMode = persona.permissionMode;
+  if (persona.systemPrompt !== undefined && target.systemPrompt === undefined) {
+    target.systemPrompt = persona.systemPrompt;
+  }
   if (persona.appendSystemPrompt) {
     target.appendSystemPrompt = target.appendSystemPrompt
       ? `${target.appendSystemPrompt}\n\n${persona.appendSystemPrompt}`
@@ -186,5 +211,6 @@ export function mergePersonaIntoOptions<
     target.agents = { ...(target.agents ?? {}), ...persona.agents };
   }
   if (persona.agent && !target.agent) target.agent = persona.agent;
+  if (persona.settingSources !== undefined) target.settingSources = persona.settingSources;
   return target;
 }

@@ -98,6 +98,17 @@ export interface ClaudeModelOptions {
   maxBudgetUsd?: number;
   /** Append to Claude Code's default system prompt */
   appendSystemPrompt?: string;
+  /** Raw system prompt that REPLACES the claude_code preset entirely.
+   *  When set, the SDK receives just this text (plus any appendSystemPrompt
+   *  appended on its own). Use for low-latency voice turns where the
+   *  full Claude Code preset (tool docs, agent instructions, etc.) is
+   *  unnecessary and wastes tokens/processing time. */
+  systemPrompt?: string;
+  /** Override the SDK settingSources that load CLAUDE.md files. Default is
+   *  ['project','local'] which loads the workspace's CLAUDE.md on every
+   *  query. Set to [] to skip this for low-latency voice turns where the
+   *  persona doesn't need project context. */
+  settingSources?: ("project" | "local" | "user")[];
   /** Max turns for the conversation */
   maxTurns?: number;
   /** Fallback model on rate limit */
@@ -225,10 +236,23 @@ export async function sendToClaudeCode(
         Object.assign(envVars, modelOptions.extraEnv);
       }
 
-      // Build system prompt — use Claude Code preset with optional append
-      const systemPromptConfig = modelOptions?.appendSystemPrompt
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: modelOptions.appendSystemPrompt }
-        : { type: 'preset' as const, preset: 'claude_code' as const };
+      // Build system prompt. Two modes:
+      //  1. Raw replacement: modelOptions.systemPrompt is a string → pass
+      //     it verbatim, skipping the claude_code preset entirely. Used
+      //     by low-latency personas (voice-chat) to avoid loading the
+      //     full code-agent preset. appendSystemPrompt (if any) is
+      //     concatenated onto the end.
+      //  2. Preset + optional append (default): use the claude_code
+      //     preset plus whatever appendSystemPrompt the persona set.
+      //     This is the original behavior for text channels.
+      const systemPromptConfig: string | { type: 'preset'; preset: 'claude_code'; append?: string } =
+        modelOptions?.systemPrompt !== undefined
+          ? (modelOptions.appendSystemPrompt
+              ? `${modelOptions.systemPrompt}\n\n${modelOptions.appendSystemPrompt}`
+              : modelOptions.systemPrompt)
+          : (modelOptions?.appendSystemPrompt
+              ? { type: 'preset' as const, preset: 'claude_code' as const, append: modelOptions.appendSystemPrompt }
+              : { type: 'preset' as const, preset: 'claude_code' as const });
 
       const queryOptions = {
         prompt,
@@ -238,8 +262,8 @@ export async function sendToClaudeCode(
           permissionMode: permMode,
           // Use Claude Code's system prompt + optional append
           systemPrompt: systemPromptConfig,
-          // Load project CLAUDE.md files
-          settingSources: ['project' as const, 'local' as const],
+          // Load project CLAUDE.md files (override via modelOptions.settingSources)
+          settingSources: modelOptions?.settingSources ?? ['project' as const, 'local' as const],
           // Native thinking config (replaces MAX_THINKING_TOKENS env var hack)
           ...(modelOptions?.thinking && { thinking: modelOptions.thinking }),
           // Effort level
